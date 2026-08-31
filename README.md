@@ -280,8 +280,8 @@ java -jar "C:\TailcatMesh\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar" connect --serve
 在本项目根目录做本地 HTTP 联调时，两个终端可以直接使用相对路径：
 
 ```powershell
-# 终端 1：启动 Server。仅限本地测试，关闭 HTTPS 强制校验。
-java -jar .\tailcat-mesh-server\target\tailcat-mesh-server-0.1.0-SNAPSHOT.jar --tailcat-mesh.security.require-https=false
+# 终端 1：启动 Server。脚本仅用于本地 HTTP 测试，会关闭 HTTPS 强制校验。
+.\server.ps1
 
 # 终端 2：首次启动 Agent；官方二进制位于 .local\tailcat\v0.3.0。
 java -jar .\tailcat-mesh-agent\target\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar connect --server http://localhost:8080 --token tm_enroll_xxx --tailcat-binary .\.local\tailcat\v0.3.0\tailcat.exe --data-dir .\data\agent
