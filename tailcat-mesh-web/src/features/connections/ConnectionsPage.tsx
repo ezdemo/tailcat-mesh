@@ -96,7 +96,7 @@ export function ConnectionsPage({ api, onUnauthorized }: { api: TailcatMeshApi; 
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">状态</th>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">路径</th>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">延迟</th>
-                  <th className="hidden px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 lg:table-cell">最近检查</th>
+                  <th className="hidden px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 md:table-cell">最近检查</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
@@ -114,7 +114,7 @@ export function ConnectionsPage({ api, onUnauthorized }: { api: TailcatMeshApi; 
                     <td className="whitespace-nowrap px-5 py-4"><Badge className={statusStyles[connection.status]}>{statusLabels[connection.status]}</Badge>{connection.lastError && <p className="mt-1 max-w-xs truncate text-[11px] text-rose-600" title={connection.lastError}>{connection.lastError}</p>}</td>
                     <td className="whitespace-nowrap px-5 py-4"><div className="flex items-center gap-2 text-sm font-semibold text-slate-700"><span className={connection.pathType === 'DIRECT' ? 'text-indigo-600' : connection.pathType === 'DERP' ? 'text-sky-600' : 'text-slate-400'}>{pathLabels[connection.pathType]}</span>{connection.derpRegion && <span className="text-xs font-normal text-slate-400">({connection.derpRegion})</span>}</div>{connection.directEndpoint && <p className="mt-1 font-mono text-[11px] text-slate-400">{connection.directEndpoint}</p>}</td>
                     <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-700">{formatLatency(connection.latencyMs)}</td>
-                    <td className="hidden whitespace-nowrap px-5 py-4 lg:table-cell"><div className="text-xs font-medium text-slate-700">{formatRelativeDate(connection.lastCheckAt)}</div><div className="mt-1 text-[11px] text-slate-400">{formatDate(connection.lastCheckAt)}</div></td>
+                    <td className="hidden whitespace-nowrap px-5 py-4 md:table-cell"><div className="text-xs font-medium text-slate-700">{formatRelativeDate(connection.lastCheckAt)}</div><div className="mt-1 text-[11px] text-slate-400">{formatDate(connection.lastCheckAt)}</div></td>
                   </tr>
                 ))}
               </tbody>

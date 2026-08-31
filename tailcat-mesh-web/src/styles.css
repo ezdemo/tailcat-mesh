@@ -1,14 +1,88 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", "Noto Sans SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Anthropic Sans", Arial, "Noto Sans SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Anthropic Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --color-ink: #141413;
+  --color-paper: #faf9f5;
+  --color-paper-raised: #fffefb;
+  --color-paper-tint: #f1efe8;
+  --color-muted: #6b6a63;
+  --color-line: #d7d4cb;
+  --color-line-soft: #e9e7df;
+
+  /* Keep the existing feature markup readable while moving its palette onto the
+     Anthropic warm monochrome system. Status tones stay intentionally muted. */
+  --color-slate-50: #faf9f5;
+  --color-slate-100: #eeece5;
+  --color-slate-200: #d7d4cb;
+  --color-slate-300: #b9b6ad;
+  --color-slate-400: #89877f;
+  --color-slate-500: #6b6a63;
+  --color-slate-600: #4e4d47;
+  --color-slate-700: #34332f;
+  --color-slate-800: #262622;
+  --color-slate-900: #1d1d1a;
+  --color-slate-950: #141413;
+
+  --color-indigo-50: #f1efe8;
+  --color-indigo-100: #e5e2d9;
+  --color-indigo-200: #d4d1c7;
+  --color-indigo-300: #b7b3a8;
+  --color-indigo-400: #96938a;
+  --color-indigo-500: #4e4d47;
+  --color-indigo-600: #141413;
+  --color-indigo-700: #141413;
+  --color-indigo-800: #141413;
+  --color-indigo-950: #141413;
+
+  --color-violet-50: #f1efe8;
+  --color-violet-100: #e5e2d9;
+  --color-violet-600: #4e4d47;
+
+  --color-sky-50: #f0f0ec;
+  --color-sky-200: #d8d8d0;
+  --color-sky-300: #c2c2b9;
+  --color-sky-600: #5f5e57;
+  --color-sky-800: #34332f;
+
+  --color-emerald-50: #e9eee8;
+  --color-emerald-100: #dce6da;
+  --color-emerald-200: #c8d7c5;
+  --color-emerald-400: #a9b8a5;
+  --color-emerald-500: #5b7157;
+  --color-emerald-600: #4e674a;
+  --color-emerald-700: #344a31;
+  --color-emerald-800: #293b27;
+
+  --color-amber-50: #f3eee2;
+  --color-amber-100: #ebe1c9;
+  --color-amber-200: #dfd1ad;
+  --color-amber-600: #8a7138;
+  --color-amber-700: #6c572d;
+  --color-amber-800: #534423;
+
+  --color-rose-50: #f3e9e6;
+  --color-rose-100: #ead9d5;
+  --color-rose-200: #dfc1ba;
+  --color-rose-500: #a46157;
+  --color-rose-600: #8e4f47;
+  --color-rose-700: #713d37;
+  --color-rose-800: #5a302b;
+
+  --shadow-card: rgba(0, 0, 0, 0.01) 0px 2px 2px 0px, rgba(0, 0, 0, 0.02) 0px 4px 4px 0px, rgba(0, 0, 0, 0.04) 0px 16px 24px 0px;
+  --shadow-elevated: rgba(0, 0, 0, 0.01) 0px 2px 2px 0px, rgba(0, 0, 0, 0.02) 0px 4px 4px 0px, rgba(0, 0, 0, 0.04) 0px 16px 24px 0px;
+  --ease-anthropic: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 :root {
-  color: #0f172a;
-  background: #f8fafc;
+  color: var(--color-ink);
+  background: var(--color-paper);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
@@ -17,18 +91,25 @@
 
 html {
   min-width: 320px;
-  background: #f8fafc;
+  background: var(--color-paper);
 }
 
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
   font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: -0.24px;
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -40,7 +121,50 @@ button:disabled {
   cursor: not-allowed;
 }
 
+input,
+select,
+textarea {
+  color: var(--color-ink);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-muted);
+  opacity: 0.7;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+/* The reference system uses a compact 12px reading rhythm. */
+.text-sm {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.text-xs {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 ::selection {
-  background: #c7d2fe;
-  color: #1e1b4b;
+  background: var(--color-ink);
+  color: #ffffff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 50ms !important;
+    animation-duration: 50ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

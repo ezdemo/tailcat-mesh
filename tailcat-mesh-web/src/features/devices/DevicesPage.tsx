@@ -117,8 +117,8 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
       </div>
 
       <Card className="mt-6 overflow-hidden">
-        <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative w-full lg:max-w-xs">
+        <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+          <div className="relative w-full md:max-w-xs">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
             <input
               value={query}
@@ -132,7 +132,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
               <button
                 key={filter.value}
                 onClick={() => setStatus(filter.value)}
-                className={cn('whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition', status === filter.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800')}
+                className={cn('min-h-11 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition', status === filter.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800')}
               >
                 {filter.label}
               </button>
@@ -156,7 +156,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:px-6">设备</th>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400">状态</th>
                   <th className="hidden px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 md:table-cell">版本</th>
-                  <th className="hidden px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 lg:table-cell">最近心跳</th>
+                  <th className="hidden px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 md:table-cell">最近心跳</th>
                   <th className="relative px-5 py-3 sm:px-6"><span className="sr-only">操作</span></th>
                 </tr>
               </thead>
@@ -164,7 +164,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
                 {filteredDevices.map((device) => (
                   <tr key={device.id} className="group transition hover:bg-slate-50/70">
                     <td className="whitespace-nowrap px-5 py-4 sm:px-6">
-                      <button className="flex items-center gap-3 text-left" onClick={() => void openDetails(device)}>
+                      <button className="flex min-h-11 items-center gap-3 text-left" onClick={() => void openDetails(device)}>
                         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-500"><Laptop className="h-4 w-4" aria-hidden="true" /></div>
                         <div>
                           <div className="text-sm font-semibold text-slate-900 group-hover:text-indigo-700">{device.name}</div>
@@ -174,9 +174,9 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
                     </td>
                     <td className="whitespace-nowrap px-5 py-4"><Badge className={statusStyles[device.status]}>{statusLabels[device.status]}</Badge></td>
                     <td className="hidden whitespace-nowrap px-5 py-4 text-xs text-slate-500 md:table-cell">Agent {device.agentVersion}<br />Tailcat {device.tailcatVersion}</td>
-                    <td className="hidden whitespace-nowrap px-5 py-4 lg:table-cell"><div className="text-xs font-medium text-slate-700">{formatRelativeDate(device.lastSeenAt)}</div><div className="mt-1 text-[11px] text-slate-400">{formatDate(device.lastSeenAt)}</div></td>
+                    <td className="hidden whitespace-nowrap px-5 py-4 md:table-cell"><div className="text-xs font-medium text-slate-700">{formatRelativeDate(device.lastSeenAt)}</div><div className="mt-1 text-[11px] text-slate-400">{formatDate(device.lastSeenAt)}</div></td>
                     <td className="whitespace-nowrap px-5 py-4 text-right sm:px-6">
-                      <button className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" onClick={() => void openDetails(device)} aria-label={`查看 ${device.name} 详情`}><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
+                      <button className="flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" onClick={() => void openDetails(device)} aria-label={`查看 ${device.name} 详情`}><ChevronRight className="h-4 w-4" aria-hidden="true" /></button>
                     </td>
                   </tr>
                 ))}
@@ -209,7 +209,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
             <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-100">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Client public key</p>
-                {selectedDevice.clientPublicKey && <button onClick={() => void copyValue(selectedDevice.clientPublicKey ?? '', 'Client 公钥')} className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500"><Copy className="h-3.5 w-3.5" aria-hidden="true" />复制</button>}
+                {selectedDevice.clientPublicKey && <button onClick={() => void copyValue(selectedDevice.clientPublicKey ?? '', 'Client 公钥')} className="inline-flex min-h-11 items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-500"><Copy className="h-3.5 w-3.5" aria-hidden="true" />复制</button>}
               </div>
               <p className="mt-2 break-all font-mono text-xs leading-5 text-slate-600">{selectedDevice.clientPublicKey ?? '尚未上报'}</p>
             </div>
@@ -253,7 +253,7 @@ function DetailItem({ label, value, copy }: { label: string; value: string; copy
   return (
     <div className="rounded-xl border border-slate-100 px-4 py-3">
       <p className="text-xs text-slate-400">{label}</p>
-      <div className="mt-1 flex items-center gap-2"><p className="min-w-0 truncate text-sm font-medium text-slate-800" title={value}>{shorten(value, 14, 8)}</p>{copy && <button onClick={copy} className="shrink-0 text-slate-400 hover:text-indigo-600" aria-label={`复制${label}`}><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>}</div>
+      <div className="mt-1 flex items-center gap-2"><p className="min-w-0 truncate text-sm font-medium text-slate-800" title={value}>{shorten(value, 14, 8)}</p>{copy && <button onClick={copy} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-slate-400 hover:text-indigo-600" aria-label={`复制${label}`}><Copy className="h-3.5 w-3.5" aria-hidden="true" /></button>}</div>
     </div>
   )
 }
