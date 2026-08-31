@@ -1,0 +1,233 @@
+# Tailcat Mesh
+
+Tailcat Mesh is an independent community project that provides a self-hosted TCP service mesh and device management layer powered by the official Tailcat data plane.
+
+Tailcat Mesh is not affiliated with, sponsored by, or endorsed by Tailscale Inc. Tailcat, Tailscale, and related names and marks belong to their respective owners.
+
+## 当前可用范围
+
+当前代码完成了规格说明书中的 M0/M1/M2/M3/M4/M5，并实现了 M6 Local Forward 核心闭环：
+
+- Maven 多模块骨架：共享协议、Java Server、Java Agent。
+- Java 21 `TailcatEngine` / `TailcatCliEngine` 边界；业务代码不直接调用 `ProcessBuilder`。
+- 官方 Tailcat v0.3.x 探测、版本校验、密钥初始化、`--json` Server 启动和结构化地址解析。
+- Server 数据库迁移、管理员登录、Enrollment Token、Agent 注册、设备审批、心跳、认证 WebSocket，以及按批准设备计算的 Desired State allowlist。
+- 每台 Agent 使用独立且持久的 Tailcat Server/Client key；Server key 固定 DERP region，旧的 auto-region Server key 会在首次 M3 启动时迁移。
+- Tailcat Server 始终显式使用 `--allow`；无批准 Peer 时使用 `--allow=none`，成员变化通过 Desired State 触发重启并重新登记 ConnBlob。
+- Service CRUD、动态 loopback ServiceBridge、Tailcat `--serve` 端口 reconcile，以及 Agent runtime 状态上报；管理员可以通过 Web 的“服务”页面发布设备可访问的 TCP 目标。
+- 每个已批准的远端 Peer 使用一个持久的官方 Tailcat SOCKS 进程；Agent 按约 30 秒周期执行 `ping`，Server 保存 Direct/DERP 路径、延迟和错误状态；管理员可以在 Web 的“连接”页面查看。
+- 管理员可以在 Web 的“转发”页面创建 Local Forward；源 Agent 固定监听 `127.0.0.1:<localPort>`，每条连接通过官方 Tailcat Peer SOCKS 执行 `CONNECT server.tailcat:<remoteBridgePort>`，并报告 READY/ERROR/STOPPED 状态。
+- Agent 可打包为可执行 fat JAR，首次注册后把 Agent credential 保存到本地，重启时复用。
+
+Windows Service 安装与自动启动仍属于后续 M7；当前 Agent 以前台进程方式运行，已经可以提供用户侧的一行命令连接和本地 TCP 端口访问。
+
+## 用户端：一行命令连接
+
+用户需要 Java 21、官方 Tailcat v0.3.x 二进制，以及管理员生成的一次性 Enrollment Token。正常运行保持前台，按 `Ctrl+C` 会停止 Agent 和它管理的 Tailcat 子进程。
+
+Windows PowerShell 示例（物理上可写成一行）：
+
+```powershell
+java -jar "C:\TailcatMesh\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar" connect --server https://mesh.example.com --token tm_enroll_xxx --tailcat-binary "C:\TailcatMesh\bin\tailcat.exe" --data-dir "C:\ProgramData\TailcatMesh"
+```
+
+首次执行会自动完成：
+
+1. 检查官方 Tailcat 版本；
+2. 在 `data-dir\identity` 生成并保存独立的 Server/Client key；
+3. 使用一次性 token 注册设备；
+4. 启动官方 Tailcat Server（显式 `--allow`；没有已批准 Peer 时为 `--allow=none`）；
+5. 上报监听地址的 hash，建立心跳和 WebSocket 控制通道。
+
+设备第一次显示为 `PENDING`。管理员审批后，Agent 会通过 Desired State 应用新的 Peer allowlist，并在下一次心跳变成 `ONLINE`；不需要重新输入 token。原始 ConnBlob 不会打印到终端。
+
+重新启动已注册 Agent：
+
+```powershell
+java -jar "C:\TailcatMesh\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar" run --server https://mesh.example.com --tailcat-binary "C:\TailcatMesh\bin\tailcat.exe" --data-dir "C:\ProgramData\TailcatMesh"
+```
+
+也可以把参数放入 `agent.yml`，以后使用 `run --config agent.yml`：
+
+```yaml
+server:
+  url: https://mesh.example.com
+tailcat:
+  binary: C:/TailcatMesh/bin/tailcat.exe
+  supportedVersion: 0.3.x
+  serverKey: server.private.json
+  clientKey: client.private.json
+  fullAddress: true
+agent:
+  dataDir: C:/ProgramData/TailcatMesh
+  heartbeatSeconds: 15
+  peerPingSeconds: 30
+```
+
+`--once` 仅用于诊断，会启动、上报并立即停止：
+
+```powershell
+java -jar "C:\TailcatMesh\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar" connect --server https://mesh.example.com --token tm_enroll_xxx --tailcat-binary "C:\TailcatMesh\bin\tailcat.exe" --data-dir "C:\ProgramData\TailcatMesh" --once
+```
+
+在本项目根目录做本地 HTTP 联调时，两个终端可以直接使用相对路径：
+
+```powershell
+# 终端 1：启动 Server。仅限本地测试，关闭 HTTPS 强制校验。
+java -jar .\tailcat-mesh-server\target\tailcat-mesh-server-0.1.0-SNAPSHOT.jar --tailcat-mesh.security.require-https=false
+
+# 终端 2：首次启动 Agent；官方二进制位于 .local\tailcat\v0.3.0。
+java -jar .\tailcat-mesh-agent\target\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar connect --server http://localhost:8080 --token tm_enroll_xxx --tailcat-binary .\.local\tailcat\v0.3.0\tailcat.exe --data-dir .\data\agent
+```
+
+本地 Agent 第一次注册后，管理员在 Web 的“设备”页批准它；服务发布在“服务”页完成。Agent 会根据服务配置在设备上创建 `127.0.0.1:<dynamicBridgePort>`，再让官方 Tailcat Server 用对应的 `--serve=<dynamicBridgePort>` 对外提供访问。服务目标端口和 bridge 端口可以不同。管理员随后在 Web 的“转发”页选择源设备、远端服务和固定本地端口，例如 `127.0.0.1:18080`。用户在源设备上直接访问这个本地地址即可，Local Forward 会通过官方 Tailcat Peer SOCKS 到达远端服务；用户不需要安装或理解 Tailcat 协议。
+
+例如把远端服务映射到本机后，用户可以直接运行：
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 18080
+curl.exe http://127.0.0.1:18080
+```
+
+### Windows wrapper
+
+发布目录可以放置 `deploy/windows/tailcat-mesh-agent.bat`、Agent JAR 和 `bin\tailcat.exe`。之后用户可以直接执行：
+
+```powershell
+.\tailcat-mesh-agent.bat connect --server https://mesh.example.com --token tm_enroll_xxx --tailcat-binary .\bin\tailcat.exe --data-dir "$env:ProgramData\TailcatMesh"
+```
+
+## 管理员最小操作
+
+管理员可以使用 `tailcat-mesh-web`，也可以使用 REST API。先登录并创建一次性 token：
+
+```powershell
+$login = Invoke-RestMethod -Method Post -Uri https://mesh.example.com/api/v1/auth/login -ContentType 'application/json' -Body '{"username":"admin","password":"<ADMIN_PASSWORD>"}'
+$headers = @{ Authorization = "Bearer $($login.accessToken)" }
+$enrollment = Invoke-RestMethod -Method Post -Uri https://mesh.example.com/api/v1/enrollment-tokens -Headers $headers -ContentType 'application/json' -Body '{"maxUses":1,"expiresInHours":24}'
+$enrollment.token
+```
+
+Agent 运行后列出设备并审批：
+
+```powershell
+$devices = Invoke-RestMethod -Method Get -Uri https://mesh.example.com/api/v1/devices -Headers $headers
+$devices | Format-Table id,name,status,hostname
+$deviceId = $devices[0].id
+Invoke-RestMethod -Method Post -Uri "https://mesh.example.com/api/v1/devices/$deviceId/approve" -Headers $headers
+```
+
+发布一个 TCP 服务（也可以直接在 Web 的“服务”页操作）：
+
+```powershell
+$service = @{
+  deviceId = $deviceId
+  name = 'NAS Web'
+  protocol = 'TCP'
+  targetHost = '192.168.1.20'
+  targetPort = 5000
+  enabled = $true
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri https://mesh.example.com/api/v1/services -Headers $headers -ContentType 'application/json' -Body $service
+```
+
+返回的 `bridgePort` 是 Agent 本机 loopback 端口，不是固定的远程访问端口；服务的 `status` 会在 Agent 同步后变为 `READY`。配置变更可能短暂重启 Tailcat 子进程并中断已有连接。
+
+查看 Peer 路径状态：
+
+```powershell
+Invoke-RestMethod -Method Get -Uri https://mesh.example.com/api/v1/connections -Headers $headers |
+  Format-Table sourceDeviceName,peerDeviceName,status,pathType,latencyMs,derpRegion,lastCheckAt
+```
+
+Enrollment Token 和管理员密码不要提交到代码仓库或日志。生产环境使用 HTTPS/WSS；本地测试可显式设置 `tailcat-mesh.security.require-https=false`。
+
+## 构建
+
+```text
+mvn clean verify
+```
+
+构建用户端 fat JAR：
+
+```text
+mvn -pl tailcat-mesh-agent -am package -DskipTests
+```
+
+输出：`tailcat-mesh-agent/target/tailcat-mesh-agent-0.1.0-SNAPSHOT.jar`。
+
+构建并运行 Server：
+
+```text
+mvn -pl tailcat-mesh-server -am package
+java -jar tailcat-mesh-server/target/tailcat-mesh-server-0.1.0-SNAPSHOT.jar
+```
+
+Server 默认使用 H2 本地文件数据库，不需要单独启动 PostgreSQL。数据库文件为运行目录下的
+`data/tailcat-mesh.mv.db`，Flyway 启动时自动执行迁移。管理员初始账号通过
+`ADMIN_USERNAME`、`ADMIN_PASSWORD` 配置；未设置时默认是 `admin` / `change-me`，生产环境应立即修改默认密码。
+
+如需切换到 PostgreSQL，只需覆盖数据库环境变量，业务代码无需修改：
+
+```powershell
+$env:DB_URL = 'jdbc:postgresql://localhost:5432/tailcat_mesh'
+$env:DB_USERNAME = 'tailcat_mesh'
+$env:DB_PASSWORD = '<DB_PASSWORD>'
+java -jar tailcat-mesh-server/target/tailcat-mesh-server-0.1.0-SNAPSHOT.jar
+```
+
+`deploy/docker-compose.yml` 是显式使用 PostgreSQL 的部署路径；本地直接运行 Server 时仍以 H2 文件数据库为默认。
+
+## 管理员 Web 控制面
+
+前端代码位于 `tailcat-mesh-web/`，当前已经对接 Server 的管理员功能：登录、
+设备列表/详情、设备审批与禁用、Enrollment Token 创建/列表/禁用、TCP 服务创建/修改/删除及运行态查看、Local Forward 创建/修改/删除及运行态查看、Peer Direct/DERP 连接状态查看。
+
+先启动 Server，再在另一个终端运行：
+
+```powershell
+cd .\tailcat-mesh-web
+npm install
+npm run dev
+```
+
+打开 `http://localhost:5173`。本地开发服务器会把 `/api` 请求代理到
+`http://localhost:8080`；本地 HTTP 测试时，Server 需要带上
+`--tailcat-mesh.security.require-https=false`。完整说明见
+`tailcat-mesh-web/README.md`。
+
+## 官方 Tailcat 二进制
+
+官方二进制不会提交到 Git。可以通过 `--tailcat-binary` 指定，或设置 `TAILCAT_BINARY`；Engine 也会探测仓库 `bin/` 和操作系统 `PATH`。当前基线是官方 Tailcat v0.3.0/v0.3.x。
+
+用真实二进制运行 Engine 测试：
+
+```text
+mvn -pl tailcat-mesh-agent "-Dtailcat.binary=C:/path/to/tailcat.exe" -Dtest=TailcatCliEngineIntegrationTest test
+```
+
+Agent Runtime 的真实 Tailcat E2E 测试：
+
+```text
+mvn -pl tailcat-mesh-agent "-Dtailcat.binary=C:/path/to/tailcat.exe" -Dtest=AgentRuntimeIntegrationTest test
+```
+
+## 设计边界与限制
+
+- 这不是系统级 VPN，不创建 TUN/TAP、Wintun 或虚拟 IP。
+- 产品范围是 TCP Service Mesh；UDP、MagicDNS、Subnet Router 和 Exit Node 产品化不在当前阶段。
+- 修改 Tailcat allowlist 或 served ports 将重启子进程，并可能短暂中断连接。
+- Server key 使用官方 `genkey --fixed-region`；相同 Server key、region 和 served-port 配置重启时 ConnBlob 保持稳定，修改 served ports 会使 ConnBlob 变化并自动重新上报。
+- Tailcat CLI 输出是外部兼容性边界，生产部署应固定版本并校验 checksum。
+
+## Repository layout
+
+```text
+tailcat-mesh/
+├─ pom.xml
+├─ tailcat-mesh-protocol/
+├─ tailcat-mesh-server/
+├─ tailcat-mesh-agent/
+├─ deploy/
+└─ docs/
+```

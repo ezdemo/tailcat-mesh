@@ -1,0 +1,18 @@
+[Unit]
+Description=Tailcat Mesh Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tailcat-mesh
+Group=tailcat-mesh
+WorkingDirectory=/opt/tailcat-mesh
+ExecStart=/usr/bin/java -jar /opt/tailcat-mesh/agent.jar
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+server:
+  url: https://mesh.example.com
+
+tailcat:
+  binary: ./bin/tailcat.exe
+  supportedVersion: 0.3.x
+  serverKey: tailcat-mesh-server
+  clientKey: tailcat-mesh-client
+  fullAddress: true
+  derpMapUrl: ""
+
+agent:
+  dataDir: ./data
+  heartbeatSeconds: 15
+  peerPingSeconds: 30
+
+forward:
+  defaultBindHost: 127.0.0.1
+
+logging:
+  level: INFO

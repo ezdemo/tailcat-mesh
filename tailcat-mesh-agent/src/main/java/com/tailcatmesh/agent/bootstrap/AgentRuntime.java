@@ -1,0 +1,1183 @@
+package com.tailcatmesh.agent.bootstrap;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.tailcatmesh.agent.config.AgentConfig;
+import com.tailcatmesh.agent.control.AgentControlClient;
+import com.tailcatmesh.agent.control.AgentControlException;
+import com.tailcatmesh.agent.forward.LocalForwardException;
+import com.tailcatmesh.agent.forward.LocalForwardHandle;
+import com.tailcatmesh.agent.forward.LocalForwardManager;
+import com.tailcatmesh.agent.forward.PeerSocksEndpoint;
+import com.tailcatmesh.agent.identity.AgentState;
+import com.tailcatmesh.agent.identity.AgentStateStore;
+import com.tailcatmesh.agent.service.ServiceBridge;
+import com.tailcatmesh.agent.service.ServiceBridgeHandle;
+import com.tailcatmesh.agent.service.ServiceRuntimeConfig;
+import com.tailcatmesh.agent.service.TcpServiceBridge;
+import com.tailcatmesh.agent.tailcat.TailcatCliEngine;
+import com.tailcatmesh.agent.tailcat.TailcatEngine;
+import com.tailcatmesh.agent.tailcat.model.ProcessState;
+import com.tailcatmesh.agent.tailcat.model.TailcatIdentity;
+import com.tailcatmesh.agent.tailcat.model.TailcatIdentityConfig;
+import com.tailcatmesh.agent.tailcat.model.TailcatPeerProxyConfig;
+import com.tailcatmesh.agent.tailcat.model.TailcatPeerProxyHandle;
+import com.tailcatmesh.agent.tailcat.model.TailcatPathType;
+import com.tailcatmesh.agent.tailcat.model.TailcatPingResult;
+import com.tailcatmesh.agent.tailcat.model.TailcatRuntimeStatus;
+import com.tailcatmesh.agent.tailcat.model.TailcatServerConfig;
+import com.tailcatmesh.agent.tailcat.model.TailcatServerHandle;
+import com.tailcatmesh.protocol.ProtocolEnvelope;
+import com.tailcatmesh.protocol.agent.AgentDesiredState;
+import com.tailcatmesh.protocol.agent.AgentEnrollmentResponse;
+import com.tailcatmesh.protocol.agent.AgentForward;
+import com.tailcatmesh.protocol.agent.AgentForwardRuntime;
+import com.tailcatmesh.protocol.agent.AgentForwardRuntimeReport;
+import com.tailcatmesh.protocol.agent.AgentHeartbeatRequest;
+import com.tailcatmesh.protocol.agent.AgentHeartbeatResponse;
+import com.tailcatmesh.protocol.agent.AgentPeer;
+import com.tailcatmesh.protocol.agent.AgentPeerRuntime;
+import com.tailcatmesh.protocol.agent.AgentPeerRuntimeReport;
+import com.tailcatmesh.protocol.agent.AgentRuntimeServerRequest;
+import com.tailcatmesh.protocol.agent.AgentService;
+import com.tailcatmesh.protocol.agent.AgentServiceRuntime;
+import com.tailcatmesh.protocol.agent.AgentServiceRuntimeReport;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.net.http.WebSocket;
+
+/**
+ * Minimal M2 Agent lifecycle: local identity, enrollment, Tailcat runtime,
+ * authenticated heartbeat and WebSocket control connection.
+ */
+public final class AgentRuntime implements AutoCloseable {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentRuntime.class);
+    private static final String CONN_BLOB_HASH_PREFIX = "sha256:";
+    private static final long DESIRED_STATE_DEBOUNCE_SECONDS = 2;
+
+    private final AgentConfig config;
+    private final TailcatEngine tailcatEngine;
+    private final AgentControlClient controlClient;
+    private final AgentStateStore stateStore;
+    private final ServiceBridge serviceBridge;
+    private final LocalForwardManager forwardManager;
+    private final String agentVersion;
+    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+    private final ScheduledExecutorService heartbeatExecutor =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "tailcat-mesh-heartbeat");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private final ScheduledExecutorService peerPingExecutor =
+            Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "tailcat-mesh-peer-ping");
+                thread.setDaemon(true);
+                return thread;
+            });
+    private final CountDownLatch termination = new CountDownLatch(1);
+    private final AtomicBoolean closed = new AtomicBoolean();
+
+    private volatile AgentState state;
+    private volatile TailcatIdentity identity;
+    private volatile TailcatServerHandle serverHandle;
+    private volatile WebSocket webSocket;
+    private volatile ScheduledFuture<?> heartbeatTask;
+    private volatile ScheduledFuture<?> peerPingTask;
+    private volatile String serverConnBlobHash;
+    private volatile String controlPlaneStatus = "PENDING";
+    private volatile long desiredRevision;
+    private volatile AgentDesiredState desiredState;
+    private volatile AgentDesiredState pendingDesiredStateFallback;
+    private volatile ScheduledFuture<?> desiredStateTask;
+    private volatile TailcatServerConfig serverConfig;
+    private volatile boolean runtimeServerReported;
+    private volatile boolean serviceRuntimeReported;
+    private volatile boolean peerRuntimeReported;
+    private volatile boolean forwardRuntimeReported;
+    private volatile List<AgentForwardRuntime> lastReportedForwardRuntimes = List.of();
+    private volatile PrintWriter output;
+    private final Object serverReconcileLock = new Object();
+    private final Object desiredStateDebounceLock = new Object();
+    private final Map<UUID, AgentService> appliedServices = new HashMap<>();
+    private final Map<UUID, ServiceBridgeHandle> serviceHandles = new HashMap<>();
+    private final Map<UUID, AgentPeer> appliedPeers = new HashMap<>();
+    private final Map<UUID, TailcatPeerProxyHandle> peerHandles = new HashMap<>();
+    private final Map<UUID, AgentPeerRuntime> peerRuntimes = new HashMap<>();
+    private final Map<UUID, AgentForward> appliedForwards = new HashMap<>();
+    private final Map<UUID, AgentForwardRuntime> forwardRuntimes = new HashMap<>();
+
+    public AgentRuntime(AgentConfig config, TailcatCliEngine engine, AgentControlClient controlClient,
+                        AgentStateStore stateStore, String agentVersion) {
+        this(config, (TailcatEngine) engine, controlClient, stateStore, new TcpServiceBridge(), agentVersion);
+    }
+
+    public AgentRuntime(AgentConfig config, TailcatEngine tailcatEngine, AgentControlClient controlClient,
+                        AgentStateStore stateStore, String agentVersion) {
+        this(config, tailcatEngine, controlClient, stateStore, new TcpServiceBridge(), agentVersion);
+    }
+
+    public AgentRuntime(AgentConfig config, TailcatEngine tailcatEngine, AgentControlClient controlClient,
+                        AgentStateStore stateStore, ServiceBridge serviceBridge, String agentVersion) {
+        this.config = Objects.requireNonNull(config, "config");
+        this.tailcatEngine = Objects.requireNonNull(tailcatEngine, "tailcatEngine");
+        this.controlClient = Objects.requireNonNull(controlClient, "controlClient");
+        this.stateStore = Objects.requireNonNull(stateStore, "stateStore");
+        this.serviceBridge = Objects.requireNonNull(serviceBridge, "serviceBridge");
+        this.forwardManager = new LocalForwardManager(this::resolvePeerSocks);
+        if (agentVersion == null || agentVersion.isBlank()) {
+            throw new IllegalArgumentException("agentVersion must not be blank");
+        }
+        this.agentVersion = agentVersion;
+    }
+
+    /** Starts the lifecycle and returns the non-sensitive startup projection. */
+    public StartupResult start(String enrollmentToken, PrintWriter output) {
+        if (closed.get()) {
+            throw new IllegalStateException("Agent runtime is closed");
+        }
+        this.output = Objects.requireNonNull(output, "output");
+        try {
+            try {
+                java.nio.file.Files.createDirectories(config.dataDir());
+            } catch (java.io.IOException exception) {
+                throw new com.tailcatmesh.agent.config.AgentConfigException(
+                        "TM-AGENT-010", "unable to create Agent data directory", exception);
+            }
+            identity = tailcatEngine.ensureIdentity(new TailcatIdentityConfig(
+                    config.serverKeyPath(), config.clientKeyPath()));
+            state = loadOrEnroll(enrollmentToken, identity);
+            AgentDesiredState initialDesiredState = controlClient.desiredState(state.agentCredential());
+            reconcileDesiredState(initialDesiredState, true);
+            sendHeartbeat();
+            openWebSocket();
+            heartbeatTask = heartbeatExecutor.scheduleAtFixedRate(this::heartbeatSafely,
+                    config.heartbeatInterval().toSeconds(), config.heartbeatInterval().toSeconds(), TimeUnit.SECONDS);
+            peerPingTask = peerPingExecutor.scheduleAtFixedRate(this::peerPingSafely,
+                    0, config.peerPingInterval().toSeconds(), TimeUnit.SECONDS);
+
+            String status = currentServerStatus();
+            output.println("Tailcat Mesh Agent connected; device=" + state.deviceId() + ", status=" + status);
+            if ("PENDING".equals(status)) {
+                output.println("Waiting for administrator approval; keep this process running.");
+            }
+            output.println("Tailcat server is running; ConnBlob is stored by the control plane (hash="
+                    + serverConnBlobHash + ")");
+            output.flush();
+            return new StartupResult(state.deviceId(), status, serverHandle.listenAddress());
+        } catch (RuntimeException exception) {
+            close();
+            throw exception;
+        }
+    }
+
+    /** Runs the foreground client until Ctrl+C or an explicit close. */
+    public int run(String enrollmentToken, boolean once, PrintWriter output) {
+        start(enrollmentToken, output);
+        if (once) {
+            close();
+            return 0;
+        }
+        Thread shutdownHook = new Thread(this::close, "tailcat-mesh-agent-shutdown");
+        try {
+            Runtime.getRuntime().addShutdownHook(shutdownHook);
+        } catch (IllegalStateException ignored) {
+            // JVM shutdown has already started; the normal close path remains safe.
+        }
+        try {
+            termination.await();
+            return 0;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return 130;
+        } finally {
+            try {
+                Runtime.getRuntime().removeShutdownHook(shutdownHook);
+            } catch (IllegalStateException ignored) {
+                // JVM shutdown is already in progress.
+            }
+        }
+    }
+
+    public Optional<AgentState> state() {
+        return Optional.ofNullable(state);
+    }
+
+    @Override
+    public void close() {
+        if (!closed.compareAndSet(false, true)) {
+            termination.countDown();
+            return;
+        }
+        ScheduledFuture<?> task = heartbeatTask;
+        if (task != null) {
+            task.cancel(false);
+        }
+        ScheduledFuture<?> peerTask = peerPingTask;
+        if (peerTask != null) {
+            peerTask.cancel(false);
+        }
+        synchronized (desiredStateDebounceLock) {
+            pendingDesiredStateFallback = null;
+            ScheduledFuture<?> desiredTask = desiredStateTask;
+            desiredStateTask = null;
+            if (desiredTask != null) {
+                desiredTask.cancel(false);
+            }
+        }
+        heartbeatExecutor.shutdownNow();
+        peerPingExecutor.shutdownNow();
+        WebSocket socket = webSocket;
+        if (socket != null) {
+            try {
+                socket.sendClose(WebSocket.NORMAL_CLOSURE, "agent stopping")
+                        .orTimeout(2, TimeUnit.SECONDS).join();
+            } catch (RuntimeException ignored) {
+                // The control plane may already be gone during shutdown.
+            }
+        }
+        AgentState currentState = state;
+        if (currentState != null && serverHandle != null) {
+            try {
+                reportRuntimeServer(false);
+            } catch (RuntimeException exception) {
+                LOGGER.debug("could not report Agent shutdown to control plane");
+            }
+        }
+        try {
+            reportServiceRuntimes(stoppedServiceRuntimes());
+        } catch (RuntimeException exception) {
+            LOGGER.debug("could not report ServiceBridge shutdown to control plane");
+        }
+        List<AgentPeerRuntime> stoppedPeers = stoppedPeerRuntimes();
+        if (!stoppedPeers.isEmpty()) {
+            try {
+                reportPeerRuntimes(stoppedPeers);
+            } catch (RuntimeException exception) {
+                LOGGER.debug("could not report Peer SOCKS shutdown to control plane");
+            }
+        }
+        List<AgentForwardRuntime> stoppedForwards = stoppedForwardRuntimes();
+        if (!stoppedForwards.isEmpty()) {
+            try {
+                reportForwardRuntimes(stoppedForwards);
+            } catch (RuntimeException exception) {
+                LOGGER.debug("could not report Local Forward shutdown to control plane");
+            }
+        }
+        forwardManager.close();
+        synchronized (serverReconcileLock) {
+            for (UUID peerDeviceId : new ArrayList<>(peerHandles.keySet())) {
+                try {
+                    tailcatEngine.stopPeerProxy(peerDeviceId);
+                } catch (RuntimeException exception) {
+                    LOGGER.debug("could not stop Peer SOCKS cleanly");
+                }
+            }
+            peerHandles.clear();
+        }
+        try {
+            tailcatEngine.stopServer();
+        } catch (RuntimeException exception) {
+            LOGGER.debug("could not stop Tailcat server cleanly", exception);
+        } finally {
+            serviceBridge.close();
+            tailcatEngine.shutdown();
+            termination.countDown();
+        }
+    }
+
+    private AgentState loadOrEnroll(String enrollmentToken, TailcatIdentity localIdentity) {
+        Optional<AgentState> saved = stateStore.load();
+        if (saved.isPresent()) {
+            return saved.get();
+        }
+        if (enrollmentToken == null || enrollmentToken.isBlank()) {
+            throw new AgentControlException("TM-CTRL-002", 400,
+                    "this Agent is not enrolled; provide --token once");
+        }
+        AgentEnrollmentResponse enrolled = controlClient.enroll(
+                enrollmentToken,
+                localHostname(),
+                normalizedOs(),
+                System.getProperty("os.arch", "unknown"),
+                agentVersion,
+                tailcatEngine.getVersion().toString(),
+                localIdentity.clientPublicKey()
+        );
+        if (enrolled == null || enrolled.deviceId() == null
+                || enrolled.agentCredential() == null || enrolled.agentCredential().isBlank()) {
+            throw new AgentControlException("TM-CTRL-004", 0, "control-plane enrollment response is incomplete");
+        }
+        AgentState result = new AgentState(enrolled.deviceId(), enrolled.agentCredential(), Instant.now());
+        controlPlaneStatus = enrolled.status() == null || enrolled.status().isBlank()
+                ? "PENDING" : enrolled.status();
+        stateStore.save(result);
+        return result;
+    }
+
+    private void sendHeartbeat() {
+        if (state == null) {
+            return;
+        }
+        refreshRuntimeState();
+        refreshServiceRuntime();
+        refreshForwardRuntime();
+        TailcatRuntimeStatus runtimeStatus = tailcatEngine.getRuntimeStatus();
+        AgentHeartbeatResponse response = controlClient.heartbeat(
+                state.agentCredential(), new AgentHeartbeatRequest(
+                        agentVersion,
+                        tailcatEngine.getVersion().toString(),
+                        desiredRevision,
+                        serverHandle != null && runtimeStatus.state() == ProcessState.RUNNING,
+                serverConnBlobHash,
+                        readyServiceCount(),
+                        readyForwardCount(),
+                        Instant.now()
+                ));
+        if (response != null && output != null && !response.status().equals(currentServerStatus())) {
+            controlPlaneStatus = response.status();
+            output.println("Control-plane device status: " + response.status());
+            output.flush();
+        } else if (response != null) {
+            controlPlaneStatus = response.status();
+        }
+        if (response != null && response.desiredRevision() > desiredRevision) {
+            scheduleDesiredStateRefresh(null);
+        }
+    }
+
+    private void heartbeatSafely() {
+        if (closed.get()) {
+            return;
+        }
+        try {
+            sendHeartbeat();
+        } catch (RuntimeException exception) {
+            LOGGER.warn("control-plane heartbeat failed; will retry");
+        }
+    }
+
+    private void openWebSocket() {
+        WebSocket.Listener listener = new WebSocket.Listener() {
+            private final StringBuilder message = new StringBuilder();
+
+            @Override
+            public void onOpen(WebSocket webSocket) {
+                webSocket.request(1);
+                sendHello(webSocket);
+            }
+
+            @Override
+            public CompletableFuture<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+                message.append(data);
+                if (last) {
+                    acceptControlMessage(message.toString());
+                    message.setLength(0);
+                }
+                webSocket.request(1);
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public CompletableFuture<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+                LOGGER.debug("control WebSocket closed: {}", statusCode);
+                return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public void onError(WebSocket webSocket, Throwable error) {
+                LOGGER.warn("control WebSocket failed; heartbeat remains active");
+            }
+        };
+        try {
+            webSocket = controlClient.openWebSocket(state.agentCredential(), listener)
+                    .get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("interrupted while opening control WebSocket");
+        } catch (TimeoutException | CompletionException exception) {
+            LOGGER.warn("control WebSocket unavailable; heartbeat remains active");
+        } catch (Exception exception) {
+            LOGGER.warn("control WebSocket unavailable; heartbeat remains active");
+        }
+    }
+
+    private void sendHello(WebSocket socket) {
+        try {
+            ObjectNode payload = objectMapper.createObjectNode()
+                    .put("deviceId", state.deviceId().toString())
+                    .put("agentVersion", agentVersion)
+                    .put("tailcatVersion", tailcatEngine.getVersion().toString());
+            String envelope = objectMapper.writeValueAsString(ProtocolEnvelope.of("HELLO", payload));
+            socket.sendText(envelope, true);
+        } catch (Exception exception) {
+            LOGGER.debug("could not send Agent HELLO envelope");
+        }
+    }
+
+    private void acceptControlMessage(String message) {
+        try {
+            JsonNode envelope = objectMapper.readTree(message);
+            ProtocolEnvelope protocolEnvelope = objectMapper.treeToValue(envelope, ProtocolEnvelope.class);
+            if ("SYNC_DESIRED_STATE".equals(protocolEnvelope.type())) {
+                long notifiedRevision = protocolEnvelope.payload().path("revision").asLong(desiredRevision);
+                if (notifiedRevision >= desiredRevision) {
+                    AgentDesiredState notifiedState = objectMapper.treeToValue(
+                            protocolEnvelope.payload(), AgentDesiredState.class);
+                    scheduleDesiredStateRefresh(notifiedState);
+                }
+            }
+        } catch (Exception exception) {
+            LOGGER.warn("ignored invalid desired state from control plane");
+        }
+    }
+
+    /**
+     * Coalesces rapid control-plane changes and refreshes the complete state
+     * from REST after the M3 debounce window. The WS payload is only a
+     * fail-closed fallback for an Agent that has just been disabled and can no
+     * longer authenticate the REST request.
+     */
+    private void scheduleDesiredStateRefresh(AgentDesiredState fallback) {
+        if (closed.get()) {
+            return;
+        }
+        synchronized (desiredStateDebounceLock) {
+            if (closed.get()) {
+                return;
+            }
+            if (fallback != null && pendingDesiredStateFallback != null
+                    && fallback.revision() < pendingDesiredStateFallback.revision()) {
+                return;
+            }
+            if (fallback != null) {
+                pendingDesiredStateFallback = fallback;
+            }
+            ScheduledFuture<?> previous = desiredStateTask;
+            if (previous != null) {
+                previous.cancel(false);
+            }
+            try {
+                desiredStateTask = heartbeatExecutor.schedule(
+                        this::applyPendingDesiredState,
+                        DESIRED_STATE_DEBOUNCE_SECONDS,
+                        TimeUnit.SECONDS);
+            } catch (RejectedExecutionException ignored) {
+                // Close raced with a control-plane notification.
+                desiredStateTask = null;
+            }
+        }
+    }
+
+    private void applyPendingDesiredState() {
+        AgentDesiredState fallback;
+        synchronized (desiredStateDebounceLock) {
+            fallback = pendingDesiredStateFallback;
+            pendingDesiredStateFallback = null;
+            desiredStateTask = null;
+        }
+        if (closed.get() || state == null) {
+            return;
+        }
+        try {
+            reconcileDesiredState(controlClient.desiredState(state.agentCredential()), false);
+        } catch (RuntimeException exception) {
+            if (fallback != null) {
+                // A disabled Agent can no longer authenticate REST calls; the
+                // authenticated WS projection still tells it to fail closed.
+                reconcileDesiredState(fallback, false);
+            } else {
+                LOGGER.warn("could not refresh newer desired state; will retry on the next heartbeat");
+            }
+        }
+    }
+
+    /** Applies the complete desired state; the REST response remains the source of truth. */
+    private void reconcileDesiredState(AgentDesiredState candidate, boolean failOnError) {
+        AgentDesiredState next = normalizeDesiredState(candidate);
+        try {
+            boolean shouldReportRuntime = false;
+            boolean shouldReportServices = false;
+            boolean shouldReportPeers = false;
+            boolean shouldReportForwards = false;
+            synchronized (serverReconcileLock) {
+                if (!failOnError && desiredState != null && next.revision() < desiredRevision) {
+                    return;
+                }
+                boolean hadServices = !appliedServices.isEmpty();
+                boolean hadPeers = !appliedPeers.isEmpty();
+                boolean hadForwards = !appliedForwards.isEmpty();
+                boolean servicesChanged = reconcileServiceBridges(next.services());
+                TailcatServerConfig nextConfig = new TailcatServerConfig(
+                        identity.serverKeyPath(),
+                        activeServicePorts(),
+                        next.allowedClientPublicKeys(),
+                        config.fullAddress(),
+                        config.derpMapUrl());
+                desiredState = next;
+                desiredRevision = next.revision();
+                boolean alreadyApplied = serverHandle != null
+                        && serverConfig != null
+                        && serverConfig.equals(nextConfig)
+                        && serverHandle.process().state() == ProcessState.RUNNING;
+                if (!alreadyApplied) {
+                    if (serverHandle != null && serverHandle.process().state() != ProcessState.STOPPED) {
+                        tailcatEngine.stopServer();
+                    }
+                    serverHandle = tailcatEngine.startServer(nextConfig);
+                    serverConfig = nextConfig;
+                    shouldReportRuntime = true;
+                } else if (!runtimeServerReported) {
+                    shouldReportRuntime = true;
+                }
+                boolean peersChanged = reconcilePeerProxies(next.peers());
+                boolean forwardsChanged = reconcileLocalForwards(next.forwards());
+                shouldReportServices = servicesChanged || !next.services().isEmpty() && !serviceRuntimeReported
+                        || next.services().isEmpty() && hadServices;
+                shouldReportPeers = peersChanged || !next.peers().isEmpty() && !peerRuntimeReported
+                        || next.peers().isEmpty() && hadPeers;
+                shouldReportForwards = forwardsChanged
+                        || !next.forwards().isEmpty() && !forwardRuntimeReported
+                        || next.forwards().isEmpty() && hadForwards;
+            }
+            if (shouldReportRuntime) {
+                reportRuntimeServer(true);
+            }
+            if (shouldReportServices) {
+                reportServiceRuntimes(serviceRuntimes());
+            }
+            if (shouldReportPeers) {
+                reportPeerRuntimes(peerRuntimeSnapshot());
+            }
+            if (shouldReportForwards) {
+                reportForwardRuntimes(forwardRuntimeSnapshot());
+            }
+        } catch (RuntimeException exception) {
+            if (failOnError) {
+                throw exception;
+            }
+            LOGGER.warn("Tailcat Server desired-state reconcile failed; will retry on the next sync");
+        }
+    }
+
+    /** Reconciles Java ServiceBridges before the Tailcat Server configuration. */
+    private boolean reconcileServiceBridges(List<AgentService> desired) {
+        Map<UUID, AgentService> desiredById = new HashMap<>();
+        for (AgentService service : desired) {
+            if (service == null || desiredById.put(service.serviceId(), service) != null) {
+                throw new AgentControlException("TM-CTRL-004", 400,
+                        "desired-state contains duplicate or null service entries");
+            }
+        }
+
+        boolean changed = false;
+        for (UUID serviceId : new ArrayList<>(appliedServices.keySet())) {
+            AgentService old = appliedServices.get(serviceId);
+            AgentService next = desiredById.get(serviceId);
+            if (next == null || !next.enabled() || !next.equals(old)) {
+                if (serviceHandles.remove(serviceId) != null) {
+                    serviceBridge.stop(serviceId);
+                }
+                changed = true;
+            }
+        }
+
+        for (AgentService service : desiredById.values()) {
+            if (!service.enabled()) {
+                continue;
+            }
+            ServiceBridgeHandle currentHandle = serviceHandles.get(service.serviceId());
+            AgentService old = appliedServices.get(service.serviceId());
+            if (currentHandle != null && service.equals(old) && currentHandle.isRunning()) {
+                continue;
+            }
+            if (currentHandle != null) {
+                serviceHandles.remove(service.serviceId());
+                serviceBridge.stop(service.serviceId());
+            }
+            ServiceBridgeHandle started = serviceBridge.start(new ServiceRuntimeConfig(
+                    service.serviceId(),
+                    "127.0.0.1",
+                    0,
+                    service.targetHost(),
+                    service.targetPort(),
+                    Duration.ofSeconds(5),
+                    Duration.ofMinutes(30)));
+            serviceHandles.put(service.serviceId(), started);
+            changed = true;
+        }
+
+        appliedServices.clear();
+        appliedServices.putAll(desiredById);
+        serviceHandles.keySet().removeIf(serviceId -> {
+            AgentService service = desiredById.get(serviceId);
+            return service == null || !service.enabled();
+        });
+        if (desiredById.isEmpty()) {
+            serviceRuntimeReported = false;
+        }
+        return changed;
+    }
+
+    /** Reconciles one long-lived official Tailcat SOCKS process per Peer. */
+    private boolean reconcilePeerProxies(List<AgentPeer> desired) {
+        Map<UUID, AgentPeer> desiredById = new HashMap<>();
+        for (AgentPeer peer : desired) {
+            if (peer == null || peerDeviceIsLocal(peer) || desiredById.put(peer.peerDeviceId(), peer) != null) {
+                throw new AgentControlException("TM-CTRL-004", 400,
+                        "desired-state contains duplicate, null, or self peer entries");
+            }
+        }
+
+        boolean changed = false;
+        for (UUID peerDeviceId : new ArrayList<>(appliedPeers.keySet())) {
+            AgentPeer previous = appliedPeers.get(peerDeviceId);
+            AgentPeer next = desiredById.get(peerDeviceId);
+            if (next == null || !Objects.equals(previous, next)) {
+                if (peerHandles.remove(peerDeviceId) != null) {
+                    tailcatEngine.stopPeerProxy(peerDeviceId);
+                }
+                peerRuntimes.remove(peerDeviceId);
+                changed = true;
+            }
+        }
+
+        for (AgentPeer peer : desiredById.values()) {
+            TailcatPeerProxyHandle current = peerHandles.get(peer.peerDeviceId());
+            if (peer.connBlob() == null) {
+                if (current != null) {
+                    peerHandles.remove(peer.peerDeviceId());
+                    tailcatEngine.stopPeerProxy(peer.peerDeviceId());
+                    changed = true;
+                }
+                peerRuntimes.put(peer.peerDeviceId(), peerRuntime(
+                        peer, "UNKNOWN", TailcatPathType.UNKNOWN, -1, null, null,
+                        "Peer ConnBlob is not available yet"));
+                continue;
+            }
+            if (current != null
+                    && current.connBlob().equals(peer.connBlob())
+                    && current.process().state() != ProcessState.STOPPED) {
+                continue;
+            }
+            if (current != null) {
+                peerHandles.remove(peer.peerDeviceId());
+                tailcatEngine.stopPeerProxy(peer.peerDeviceId());
+            }
+            try {
+                TailcatPeerProxyHandle started = tailcatEngine.startPeerProxy(
+                        peer.peerDeviceId(), peer.connBlob(),
+                        new TailcatPeerProxyConfig(identity.clientKeyPath(), "127.0.0.1", 0));
+                peerHandles.put(peer.peerDeviceId(), started);
+                peerRuntimes.put(peer.peerDeviceId(), peerRuntime(
+                        peer, "UNKNOWN", TailcatPathType.UNKNOWN, -1, null, null,
+                        null));
+            } catch (RuntimeException exception) {
+                peerHandles.remove(peer.peerDeviceId());
+                peerRuntimes.put(peer.peerDeviceId(), peerRuntime(
+                        peer, "DEGRADED", TailcatPathType.UNKNOWN, -1, null, null,
+                        "Peer SOCKS failed to start"));
+                LOGGER.warn("Peer SOCKS could not start; path checks will retry");
+            }
+            changed = true;
+        }
+
+        appliedPeers.clear();
+        appliedPeers.putAll(desiredById);
+        if (desiredById.isEmpty()) {
+            peerRuntimeReported = false;
+        }
+        return changed;
+    }
+
+    /** Reconciles fixed-port loopback listeners after their Peer SOCKS processes. */
+    private boolean reconcileLocalForwards(List<AgentForward> desired) {
+        Map<UUID, AgentForward> desiredById = new HashMap<>();
+        for (AgentForward forward : desired) {
+            if (forward == null || peerDeviceIsLocal(forward.peerDeviceId())
+                    || desiredById.put(forward.forwardId(), forward) != null) {
+                throw new AgentControlException("TM-CTRL-004", 400,
+                        "desired-state contains duplicate, null, or self Local Forward entries");
+            }
+        }
+
+        boolean changed = false;
+        for (UUID forwardId : new ArrayList<>(appliedForwards.keySet())) {
+            AgentForward previous = appliedForwards.get(forwardId);
+            AgentForward next = desiredById.get(forwardId);
+            if (next == null || !next.enabled() || !Objects.equals(previous, next)) {
+                forwardManager.stop(forwardId);
+                forwardRuntimes.remove(forwardId);
+                changed = true;
+            }
+        }
+
+        for (AgentForward forward : desiredById.values()) {
+            if (!forward.enabled()) {
+                forwardManager.stop(forward.forwardId());
+                forwardRuntimes.put(forward.forwardId(),
+                        new AgentForwardRuntime(forward.forwardId(), "STOPPED", null, null));
+                continue;
+            }
+            LocalForwardHandle current = forwardManager.handle(forward.forwardId()).orElse(null);
+            AgentForward previous = appliedForwards.get(forward.forwardId());
+            if (current != null && forward.equals(previous) && current.isRunning()) {
+                forwardRuntimes.put(forward.forwardId(), current.runtime());
+                continue;
+            }
+            if (current != null) {
+                forwardManager.stop(forward.forwardId());
+            }
+            try {
+                LocalForwardHandle started = forwardManager.start(forward);
+                forwardRuntimes.put(forward.forwardId(), started.runtime());
+            } catch (LocalForwardException exception) {
+                forwardRuntimes.put(forward.forwardId(), new AgentForwardRuntime(
+                        forward.forwardId(), "ERROR", exception.code(), safeError(exception)));
+                LOGGER.warn("Local Forward {} could not start: {}", forward.forwardId(), exception.getMessage());
+            } catch (RuntimeException exception) {
+                forwardRuntimes.put(forward.forwardId(), new AgentForwardRuntime(
+                        forward.forwardId(), "ERROR", "TM-AGENT-008", safeError(exception)));
+                LOGGER.warn("Local Forward {} could not start", forward.forwardId());
+            }
+            changed = true;
+        }
+
+        appliedForwards.clear();
+        appliedForwards.putAll(desiredById);
+        if (desiredById.isEmpty()) {
+            forwardRuntimeReported = false;
+            lastReportedForwardRuntimes = List.of();
+        }
+        return changed;
+    }
+
+    private Optional<PeerSocksEndpoint> resolvePeerSocks(UUID peerDeviceId) {
+        synchronized (serverReconcileLock) {
+            TailcatPeerProxyHandle handle = peerHandles.get(peerDeviceId);
+            if (handle == null || handle.process().state() != ProcessState.RUNNING) {
+                return Optional.empty();
+            }
+            return Optional.of(new PeerSocksEndpoint(handle.localSocksHost(), handle.localSocksPort()));
+        }
+    }
+
+    private boolean peerDeviceIsLocal(AgentPeer peer) {
+        return state != null && state.deviceId().equals(peer.peerDeviceId());
+    }
+
+    private boolean peerDeviceIsLocal(UUID peerDeviceId) {
+        return state != null && state.deviceId().equals(peerDeviceId);
+    }
+
+    private List<Integer> activeServicePorts() {
+        return serviceHandles.values().stream()
+                .filter(handle -> handle.isRunning() && "READY".equals(handle.status()))
+                .map(ServiceBridgeHandle::bridgePort)
+                .distinct()
+                .sorted()
+                .toList();
+    }
+
+    /** Runs the documented Tailcat ping for every desired Peer. */
+    private void peerPingSafely() {
+        if (closed.get() || state == null) {
+            return;
+        }
+        try {
+            refreshPeerPaths();
+        } catch (RuntimeException exception) {
+            LOGGER.warn("peer path refresh failed; will retry on the next interval");
+        }
+    }
+
+    private void refreshPeerPaths() {
+        List<AgentPeer> peers;
+        synchronized (serverReconcileLock) {
+            peers = appliedPeers.values().stream()
+                    .sorted(java.util.Comparator.comparing(AgentPeer::peerDeviceId))
+                    .toList();
+        }
+        if (peers.isEmpty()) {
+            return;
+        }
+
+        for (AgentPeer peer : peers) {
+            TailcatPeerProxyHandle handle;
+            synchronized (serverReconcileLock) {
+                handle = peerHandles.get(peer.peerDeviceId());
+            }
+            if (peer.connBlob() == null) {
+                updatePeerRuntime(peerRuntime(peer, "UNKNOWN", TailcatPathType.UNKNOWN, -1,
+                        null, null, "Peer ConnBlob is not available yet"));
+                continue;
+            }
+            if (handle == null || handle.process().state() != ProcessState.RUNNING) {
+                String message = handle == null ? "Peer SOCKS is not running"
+                        : "Peer SOCKS is " + handle.status();
+                updatePeerRuntime(peerRuntime(peer, "DEGRADED", TailcatPathType.UNKNOWN, -1,
+                        null, null, message));
+                continue;
+            }
+            try {
+                TailcatPingResult result = tailcatEngine.ping(peer.connBlob(), Duration.ofSeconds(5));
+                String status = switch (result.pathType()) {
+                    case DIRECT, DERP -> "ONLINE";
+                    case OFFLINE -> "OFFLINE";
+                    case UNKNOWN -> "UNKNOWN";
+                };
+                updatePeerRuntime(peerRuntime(peer, status, result.pathType(), result.latencyMs(),
+                        result.derpRegion(), result.endpoint(), null));
+            } catch (RuntimeException exception) {
+                updatePeerRuntime(peerRuntime(peer, "DEGRADED", TailcatPathType.UNKNOWN, -1,
+                        null, null, "Tailcat peer ping failed"));
+            }
+        }
+        try {
+            reportPeerRuntimes(peerRuntimeSnapshot());
+        } catch (RuntimeException exception) {
+            LOGGER.warn("could not report Peer path state; will retry on the next interval");
+        }
+    }
+
+    private void updatePeerRuntime(AgentPeerRuntime runtime) {
+        synchronized (serverReconcileLock) {
+            if (appliedPeers.containsKey(runtime.peerDeviceId())) {
+                peerRuntimes.put(runtime.peerDeviceId(), runtime);
+            }
+        }
+    }
+
+    private AgentPeerRuntime peerRuntime(AgentPeer peer, String status, TailcatPathType pathType,
+                                         double latencyMs, String derpRegion, String endpoint,
+                                         String lastError) {
+        return new AgentPeerRuntime(peer.peerDeviceId(), status, pathType.name(), latencyMs,
+                derpRegion, endpoint, lastError);
+    }
+
+    private List<AgentPeerRuntime> peerRuntimeSnapshot() {
+        synchronized (serverReconcileLock) {
+            return appliedPeers.values().stream()
+                    .sorted(java.util.Comparator.comparing(AgentPeer::peerDeviceId))
+                    .map(peer -> peerRuntimes.getOrDefault(peer.peerDeviceId(),
+                            peerRuntime(peer, "UNKNOWN", TailcatPathType.UNKNOWN, -1,
+                                    null, null, null)))
+                    .toList();
+        }
+    }
+
+    private List<AgentPeerRuntime> stoppedPeerRuntimes() {
+        synchronized (serverReconcileLock) {
+            return appliedPeers.values().stream()
+                    .sorted(java.util.Comparator.comparing(AgentPeer::peerDeviceId))
+                    .map(peer -> peerRuntime(peer, "STOPPED", TailcatPathType.UNKNOWN, -1,
+                            null, null, null))
+                    .toList();
+        }
+    }
+
+    private List<AgentServiceRuntime> serviceRuntimes() {
+        List<AgentServiceRuntime> runtimes = new ArrayList<>();
+        for (AgentService service : appliedServices.values().stream()
+                .sorted(java.util.Comparator.comparing(AgentService::serviceId)).toList()) {
+            if (!service.enabled()) {
+                runtimes.add(new AgentServiceRuntime(service.serviceId(), null, "STOPPED", null));
+                continue;
+            }
+            ServiceBridgeHandle handle = serviceHandles.get(service.serviceId());
+            if (handle == null || !handle.isRunning()) {
+                runtimes.add(new AgentServiceRuntime(service.serviceId(), null, "FAILED",
+                        handle == null ? "ServiceBridge is not running" : handle.lastError()));
+                continue;
+            }
+            runtimes.add(new AgentServiceRuntime(
+                    service.serviceId(),
+                    handle.bridgePort(),
+                    handle.status(),
+                    handle.lastError()));
+        }
+        return List.copyOf(runtimes);
+    }
+
+    private List<AgentServiceRuntime> stoppedServiceRuntimes() {
+        return appliedServices.values().stream()
+                .sorted(java.util.Comparator.comparing(AgentService::serviceId))
+                .map(service -> new AgentServiceRuntime(service.serviceId(), null, "STOPPED", null))
+                .toList();
+    }
+
+    private void reportServiceRuntimes(List<AgentServiceRuntime> runtimes) {
+        if (state == null || runtimes == null || runtimes.isEmpty()) {
+            return;
+        }
+        controlClient.reportRuntimeServices(state.agentCredential(),
+                new AgentServiceRuntimeReport(runtimes, Instant.now()));
+        serviceRuntimeReported = true;
+    }
+
+    private void reportPeerRuntimes(List<AgentPeerRuntime> runtimes) {
+        if (state == null || runtimes == null) {
+            return;
+        }
+        controlClient.reportRuntimePeers(state.agentCredential(),
+                new AgentPeerRuntimeReport(runtimes, Instant.now()));
+        peerRuntimeReported = true;
+    }
+
+    private void reportForwardRuntimes(List<AgentForwardRuntime> runtimes) {
+        if (state == null || runtimes == null) {
+            return;
+        }
+        List<AgentForwardRuntime> snapshot = List.copyOf(runtimes);
+        controlClient.reportRuntimeForwards(state.agentCredential(),
+                new AgentForwardRuntimeReport(snapshot, Instant.now()));
+        forwardRuntimeReported = true;
+        lastReportedForwardRuntimes = snapshot;
+    }
+
+    private int readyServiceCount() {
+        synchronized (serverReconcileLock) {
+            return (int) serviceHandles.values().stream()
+                    .filter(handle -> handle.isRunning() && "READY".equals(handle.status()))
+                    .count();
+        }
+    }
+
+    private int readyForwardCount() {
+        synchronized (serverReconcileLock) {
+            return forwardManager.readyCount();
+        }
+    }
+
+    private void refreshServiceRuntime() {
+        AgentDesiredState current = desiredState;
+        if (current == null || current.services().isEmpty()) {
+            return;
+        }
+        boolean unhealthy = false;
+        synchronized (serverReconcileLock) {
+            for (AgentService service : current.services()) {
+                if (service.enabled()) {
+                    ServiceBridgeHandle handle = serviceHandles.get(service.serviceId());
+                    if (handle == null || !handle.isRunning()) {
+                        unhealthy = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (unhealthy) {
+            reconcileDesiredState(current, false);
+        }
+    }
+
+    private void refreshForwardRuntime() {
+        AgentDesiredState current = desiredState;
+        if (current == null || current.forwards().isEmpty()) {
+            return;
+        }
+        boolean unhealthy = false;
+        synchronized (serverReconcileLock) {
+            for (AgentForward forward : current.forwards()) {
+                if (forward.enabled()) {
+                    LocalForwardHandle handle = forwardManager.handle(forward.forwardId()).orElse(null);
+                    if (handle == null || !handle.isRunning()) {
+                        unhealthy = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (unhealthy) {
+            reconcileDesiredState(current, false);
+        }
+        List<AgentForwardRuntime> snapshot = forwardRuntimeSnapshot();
+        if (!snapshot.equals(lastReportedForwardRuntimes)) {
+            try {
+                reportForwardRuntimes(snapshot);
+            } catch (RuntimeException exception) {
+                LOGGER.warn("could not report Local Forward runtime; will retry");
+            }
+        }
+    }
+
+    private List<AgentForwardRuntime> forwardRuntimeSnapshot() {
+        synchronized (serverReconcileLock) {
+            return appliedForwards.values().stream()
+                    .sorted(java.util.Comparator.comparing(AgentForward::forwardId))
+                    .map(forward -> {
+                        if (!forward.enabled()) {
+                            return new AgentForwardRuntime(forward.forwardId(), "STOPPED", null, null);
+                        }
+                        LocalForwardHandle handle = forwardManager.handle(forward.forwardId()).orElse(null);
+                        if (handle != null) {
+                            AgentForwardRuntime runtime = handle.runtime();
+                            forwardRuntimes.put(forward.forwardId(), runtime);
+                            return runtime;
+                        }
+                        return forwardRuntimes.getOrDefault(forward.forwardId(),
+                                new AgentForwardRuntime(forward.forwardId(), "ERROR", "TM-AGENT-007",
+                                        "Local Forward listener is not running"));
+                    })
+                    .toList();
+        }
+    }
+
+    private List<AgentForwardRuntime> stoppedForwardRuntimes() {
+        synchronized (serverReconcileLock) {
+            return appliedForwards.values().stream()
+                    .sorted(java.util.Comparator.comparing(AgentForward::forwardId))
+                    .map(forward -> new AgentForwardRuntime(
+                            forward.forwardId(), "STOPPED", null, null))
+                    .toList();
+        }
+    }
+
+    private AgentDesiredState normalizeDesiredState(AgentDesiredState candidate) {
+        if (candidate == null) {
+            return new AgentDesiredState(state.deviceId(), 0, List.of(), List.of(), List.of(),
+                    java.util.Map.of(), java.util.Map.of());
+        }
+        if (candidate.deviceId() != null && !state.deviceId().equals(candidate.deviceId())) {
+            throw new AgentControlException("TM-CTRL-004", 400,
+                    "desired-state deviceId does not match this Agent");
+        }
+        if (candidate.revision() < 0) {
+            throw new AgentControlException("TM-CTRL-004", 400,
+                    "desired-state revision is invalid");
+        }
+        return new AgentDesiredState(
+                state.deviceId(),
+                candidate.revision(),
+                candidate.allowedClientPublicKeys(),
+                candidate.services(),
+                candidate.peers(),
+                candidate.forwards(),
+                candidate.derp(),
+                candidate.settings());
+    }
+
+    /** Reports the current ConnBlob only through the authenticated control channel. */
+    private void reportRuntimeServer(boolean running) {
+        if (state == null) {
+            return;
+        }
+        String connBlob = running && serverHandle != null ? serverHandle.listenAddress() : null;
+        String connBlobHash = connBlob == null ? null : hashConnBlob(connBlob);
+        controlClient.reportRuntimeServer(state.agentCredential(), new AgentRuntimeServerRequest(
+                running, connBlob, connBlob, Instant.now()));
+        serverConnBlobHash = connBlobHash;
+        runtimeServerReported = running;
+    }
+
+    /** Detects a supervisor restart and re-uploads a changed token or runtime state. */
+    private void refreshRuntimeState() {
+        TailcatServerHandle currentHandle = serverHandle;
+        if (currentHandle == null) {
+            return;
+        }
+        TailcatRuntimeStatus runtimeStatus = tailcatEngine.getRuntimeStatus();
+        boolean running = runtimeStatus.state() == ProcessState.RUNNING
+                && runtimeStatus.listenAddress() != null;
+        boolean addressChanged = running
+                && !runtimeStatus.listenAddress().equals(currentHandle.listenAddress());
+        if (addressChanged) {
+            synchronized (serverReconcileLock) {
+                if (serverHandle == currentHandle) {
+                    serverHandle = new TailcatServerHandle(
+                            currentHandle.process(), runtimeStatus.listenAddress(), currentHandle.startedAt());
+                }
+            }
+        }
+        if (running && (!runtimeServerReported || addressChanged)) {
+            try {
+                reportRuntimeServer(true);
+            } catch (RuntimeException exception) {
+                LOGGER.warn("could not report recovered Tailcat Server runtime; will retry");
+            }
+        } else if (!running && runtimeServerReported) {
+            try {
+                reportRuntimeServer(false);
+            } catch (RuntimeException exception) {
+                LOGGER.debug("could not report degraded Tailcat Server runtime");
+            }
+        }
+    }
+
+    private String currentServerStatus() {
+        if (serverHandle == null) {
+            return "STOPPED";
+        }
+        return controlPlaneStatus;
+    }
+
+    private static String localHostname() {
+        String fromEnvironment = System.getenv("COMPUTERNAME");
+        if (fromEnvironment != null && !fromEnvironment.isBlank()) {
+            return fromEnvironment.trim();
+        }
+        try {
+            return InetAddress.getLocalHost().getHostName();
+        } catch (Exception exception) {
+            return "unknown-host";
+        }
+    }
+
+    private static String normalizedOs() {
+        return System.getProperty("os.name", "unknown").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static String hashConnBlob(String connBlob) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(connBlob.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte item : digest) {
+                hex.append(String.format("%02x", item));
+            }
+            return CONN_BLOB_HASH_PREFIX + hex;
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static String safeError(Throwable exception) {
+        String message = exception == null ? "Local Forward failed" : exception.getMessage();
+        if (message == null || message.isBlank()) {
+            message = exception == null ? "Local Forward failed" : exception.getClass().getSimpleName();
+        }
+        return message.length() <= 2_000 ? message : message.substring(0, 2_000);
+    }
+
+    public record StartupResult(UUID deviceId, String status, String listenAddress) {
+    }
+}

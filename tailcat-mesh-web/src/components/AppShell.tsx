@@ -1,0 +1,141 @@
+import { useState, type ReactNode } from 'react'
+import {
+  Activity,
+  ArrowRightLeft,
+  Cable,
+  KeyRound,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  MonitorSmartphone,
+  Network,
+  Server,
+  Settings2,
+  X,
+} from 'lucide-react'
+import { cn } from './ui'
+
+export type ViewId = 'overview' | 'devices' | 'services' | 'forwards' | 'connections' | 'tokens'
+
+const navigation: Array<{ id: ViewId; label: string; description: string; icon: typeof LayoutDashboard }> = [
+  { id: 'overview', label: '总览', description: '控制面状态', icon: LayoutDashboard },
+  { id: 'devices', label: '设备', description: '审批与状态', icon: MonitorSmartphone },
+  { id: 'services', label: '服务', description: '发布 TCP 服务', icon: Server },
+  { id: 'forwards', label: '转发', description: '本地访问远端服务', icon: ArrowRightLeft },
+  { id: 'connections', label: '连接', description: 'Direct / DERP 路径', icon: Cable },
+  { id: 'tokens', label: '加入凭证', description: 'Enrollment Token', icon: KeyRound },
+]
+
+export function AppShell({
+  view,
+  onNavigate,
+  onLogout,
+  username,
+  apiBaseUrl,
+  children,
+}: {
+  view: ViewId
+  onNavigate: (view: ViewId) => void
+  onLogout: () => void
+  username: string
+  apiBaseUrl: string
+  children: ReactNode
+}) {
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  function navigate(nextView: ViewId) {
+    onNavigate(nextView)
+    setMobileOpen(false)
+  }
+
+  const nav = (
+    <>
+      <div className="flex h-20 items-center gap-3 px-5">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-lg shadow-indigo-600/20">
+          <Network className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div>
+          <div className="text-sm font-bold tracking-tight text-white">Tailcat Mesh</div>
+          <div className="text-xs text-slate-400">Control Plane</div>
+        </div>
+        <button className="ml-auto rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white lg:hidden" onClick={() => setMobileOpen(false)} aria-label="关闭菜单">
+          <X className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="px-3 py-5">
+        <p className="px-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Workspace</p>
+        <nav className="mt-3 space-y-1" aria-label="主导航">
+          {navigation.map((item) => {
+            const Icon = item.icon
+            const active = item.id === view
+            return (
+              <button
+                key={item.id}
+                onClick={() => navigate(item.id)}
+                className={cn(
+                  'group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition',
+                  active ? 'bg-white/10 text-white shadow-sm' : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-100',
+                )}
+              >
+                <Icon className={cn('h-5 w-5 shrink-0', active ? 'text-indigo-300' : 'text-slate-500 group-hover:text-slate-300')} aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold">{item.label}</span>
+                  <span className={cn('mt-0.5 block text-xs', active ? 'text-slate-300' : 'text-slate-500')}>{item.description}</span>
+                </span>
+              </button>
+            )
+          })}
+        </nav>
+      </div>
+
+      <div className="mt-auto px-5 pb-5">
+        <div className="rounded-2xl bg-slate-800/70 p-4 ring-1 ring-white/5">
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
+            <Activity className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+            控制面已连接
+          </div>
+          <p className="mt-2 truncate text-xs text-slate-500" title={apiBaseUrl || '当前前端代理'}>
+            {apiBaseUrl || 'Vite 代理 → localhost:8080'}
+          </p>
+        </div>
+        <button onClick={onLogout} className="mt-4 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-400 transition hover:bg-white/[0.06] hover:text-white">
+          <LogOut className="h-4 w-4" aria-hidden="true" />
+          退出登录
+        </button>
+      </div>
+    </>
+  )
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 flex-col bg-slate-950 lg:flex">{nav}</aside>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button className="fixed inset-0 bg-slate-950/40" onClick={() => setMobileOpen(false)} aria-label="关闭菜单" />
+          <aside className="relative flex h-full w-72 flex-col bg-slate-950 shadow-2xl">{nav}</aside>
+        </div>
+      )}
+
+      <div className="lg:pl-72">
+        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200/80 bg-slate-50/90 px-4 backdrop-blur sm:px-8">
+          <button className="rounded-lg p-2 text-slate-500 hover:bg-white hover:text-slate-950 lg:hidden" onClick={() => setMobileOpen(true)} aria-label="打开菜单">
+            <Menu className="h-5 w-5" aria-hidden="true" />
+          </button>
+          <div className="hidden items-center gap-2 text-xs text-slate-500 sm:flex">
+            <Settings2 className="h-4 w-4" aria-hidden="true" />
+            <span>管理员控制台</span>
+            <span className="text-slate-300">/</span>
+            <span className="font-medium text-slate-700">{username}</span>
+          </div>
+          <div className="ml-auto flex items-center gap-2 text-xs text-slate-500">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" aria-hidden="true" />
+            <span>本地控制面</span>
+          </div>
+        </header>
+        <main className="px-4 py-8 sm:px-8 lg:px-12">{children}</main>
+      </div>
+    </div>
+  )
+}

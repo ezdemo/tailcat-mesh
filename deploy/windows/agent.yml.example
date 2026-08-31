@@ -1,0 +1,14 @@
+server:
+  url: https://mesh.example.com
+
+tailcat:
+  binary: bin/tailcat.exe
+  supportedVersion: 0.3.x
+  serverKey: server.private.json
+  clientKey: client.private.json
+  fullAddress: true
+
+agent:
+  dataDir: data
+  heartbeatSeconds: 15
+  peerPingSeconds: 30

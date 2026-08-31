@@ -1,0 +1,27 @@
+# Maven output
+target/
+
+# Local third-party runtime used by integration tests
+.local/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# Runtime data and local configuration
+data/
+*.log
+agent.yml
+application-local.yml
+
+# Frontend dependencies and build output
+tailcat-mesh-web/node_modules/
+tailcat-mesh-web/dist/
+tailcat-mesh-web/.env
+
+# Java and OS noise
+*.class
+hs_err_pid*.log
+.DS_Store
+Thumbs.db

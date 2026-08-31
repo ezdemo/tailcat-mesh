@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:tailcat_mesh_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+tailcat-mesh:
+  security:
+    require-https: false
+  web:
+    allowed-origins: ""
+  admin:
+    username: admin
+    password: test-password

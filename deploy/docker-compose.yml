@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: tailcat_mesh
+      POSTGRES_USER: tailcat_mesh
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD before starting}
+    volumes:
+      - tailcat-mesh-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tailcat_mesh -d tailcat_mesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    image: tailcat-mesh-server:0.1.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/tailcat_mesh
+      DB_USERNAME: tailcat_mesh
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD before starting}
+    ports:
+      - "8080:8080"
+
+volumes:
+  tailcat-mesh-postgres:
