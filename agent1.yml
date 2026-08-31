@@ -1,0 +1,32 @@
+server:
+  url: http://localhost:8080
+
+tailcat:
+  binary: ./.local/tailcat/v0.3.0/tailcat.exe
+  supportedVersion: 0.3.x
+  serverKey: tailcat-mesh-server
+  clientKey: tailcat-mesh-client
+  fullAddress: true
+
+agent:
+  dataDir: ./data/agent
+  heartbeatSeconds: 15
+  peerPingSeconds: 30
+
+# Agent 1 uses its own Wintun adapter. M7 is TCP-first; no default route is added.
+virtualLan:
+  enabled: true
+  interfaceName: TailcatMeshAgent1
+  adapterGuid: 7d2a8db0-6f69-4d26-9d6e-9e0e4d2c6b71
+  wintunDll: ./.local/m7-e2e/wintun.dll
+  tun2socksBinary: ./.local/m7-e2e/tun2socks-windows-amd64-v3.exe
+  workingDirectory: ./.local/m7-e2e
+  tun2socksArguments:
+    - --device
+    - tun://${tun}?guid={7d2a8db0-6f69-4d26-9d6e-9e0e4d2c6b71}
+    - --proxy
+    - ${proxy}
+    - --loglevel
+    - info
+  commandTimeoutSeconds: 15
+  startupTimeoutSeconds: 20

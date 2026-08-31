@@ -1,0 +1,32 @@
+server:
+  url: http://localhost:8080
+
+tailcat:
+  binary: ./.local/tailcat/v0.3.0/tailcat.exe
+  supportedVersion: 0.3.x
+  serverKey: tailcat-mesh-server
+  clientKey: tailcat-mesh-client
+  fullAddress: true
+
+agent:
+  dataDir: ./data/agent2
+  heartbeatSeconds: 15
+  peerPingSeconds: 30
+
+# Agent 2 uses a different Wintun adapter so both local Agents can run together.
+virtualLan:
+  enabled: true
+  interfaceName: TailcatMeshAgent2
+  adapterGuid: 8e3b9ec1-7f7a-5e37-ae7f-af1f5e3d7c82
+  wintunDll: ./.local/m7-e2e/wintun.dll
+  tun2socksBinary: ./.local/m7-e2e/tun2socks-windows-amd64-v3.exe
+  workingDirectory: ./.local/m7-e2e
+  tun2socksArguments:
+    - --device
+    - tun://${tun}?guid={8e3b9ec1-7f7a-5e37-ae7f-af1f5e3d7c82}
+    - --proxy
+    - ${proxy}
+    - --loglevel
+    - info
+  commandTimeoutSeconds: 15
+  startupTimeoutSeconds: 20

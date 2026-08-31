@@ -70,9 +70,24 @@ public final class AgentCli {
             stderr.println("Error [" + code + "]: " + exception.getMessage());
             return 1;
         } catch (Exception exception) {
-            stderr.println("Error: Agent startup failed");
+            Throwable rootCause = rootCause(exception);
+            String detail = rootCause.getMessage();
+            if (detail == null || detail.isBlank()) {
+                detail = rootCause.getClass().getSimpleName();
+            } else {
+                detail = rootCause.getClass().getSimpleName() + ": " + detail;
+            }
+            stderr.println("Error: Agent startup failed - " + detail);
             return 1;
         }
+    }
+
+    private static Throwable rootCause(Throwable exception) {
+        Throwable current = exception;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private static void printHelp(PrintWriter output) {

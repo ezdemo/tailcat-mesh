@@ -82,6 +82,20 @@ java -jar .\tailcat-mesh-server\target\tailcat-mesh-server-0.1.0-SNAPSHOT.jar --
 java -jar .\tailcat-mesh-agent\target\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar connect --server http://localhost:8080 --token tm_enroll_xxx --tailcat-binary .\.local\tailcat\v0.3.0\tailcat.exe --data-dir .\data\agent
 ```
 
+如果要在同一台 Windows 主机上启动两个带 Virtual LAN 的逻辑设备，可以使用项目根目录的 `agent1.ps1` 和 `agent2.ps1`。它们分别使用 `data/agent`、`data/agent2` 及不同的 Wintun 网卡：
+
+```powershell
+.\agent1.ps1 -Token "<agent1-one-time-token>"
+.\agent2.ps1 -Token "<agent2-one-time-token>"
+```
+
+若对应 data 目录中已经存在 `identity/agent-state.json`，脚本会自动执行 `run`，不再需要 Token：
+
+```powershell
+.\agent1.ps1
+.\agent2.ps1
+```
+
 本地 Agent 第一次注册后，管理员在 Web 的“设备”页批准它；服务发布在“服务”页完成。Agent 会根据服务配置在设备上创建 `127.0.0.1:<dynamicBridgePort>`，再让官方 Tailcat Server 用对应的 `--serve=<dynamicBridgePort>` 对外提供访问。服务目标端口和 bridge 端口可以不同。管理员随后在 Web 的“转发”页选择源设备、远端服务和固定本地端口，例如 `127.0.0.1:18080`。用户在源设备上直接访问这个本地地址即可，Local Forward 会通过官方 Tailcat Peer SOCKS 到达远端服务；用户不需要安装或理解 Tailcat 协议。
 
 例如把远端服务映射到本机后，用户可以直接运行：
