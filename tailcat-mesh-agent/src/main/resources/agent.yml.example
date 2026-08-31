@@ -14,6 +14,23 @@ agent:
   heartbeatSeconds: 15
   peerPingSeconds: 30
 
+# M7 Virtual LAN is opt-in because it creates a system TUN and Mesh CIDR routes.
+# The tun2socks argument list is intentionally explicit: different binaries
+# expose different flags. Use ${tun} and ${proxy} placeholders as needed.
+virtualLan:
+  enabled: false
+  interfaceName: TailcatMesh
+  adapterGuid: 7d2a8db0-6f69-4d26-9d6e-9e0e4d2c6b71
+  wintunDll: ./bin/wintun.dll
+  tun2socksBinary: ./bin/tun2socks.exe
+  tun2socksArguments:
+    - --device
+    - ${tun}
+    - --proxy
+    - ${proxy}
+  commandTimeoutSeconds: 15
+  startupTimeoutSeconds: 15
+
 forward:
   defaultBindHost: 127.0.0.1
 

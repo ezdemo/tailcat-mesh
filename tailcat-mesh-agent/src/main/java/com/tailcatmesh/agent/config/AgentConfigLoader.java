@@ -10,6 +10,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 /** Loads the documented agent.yml shape without making YAML part of the Tailcat boundary. */
 public final class AgentConfigLoader {
@@ -45,6 +48,7 @@ public final class AgentConfigLoader {
         String derpMapUrl = text(root, "tailcat.derpMapUrl", "");
         int heartbeatSeconds = boundedSeconds(root, "agent.heartbeatSeconds", DEFAULT_HEARTBEAT_SECONDS);
         int peerPingSeconds = boundedSeconds(root, "agent.peerPingSeconds", DEFAULT_PEER_PING_SECONDS);
+        VirtualLanAgentConfig virtualLan = virtualLan(root, baseDir);
 
         return new AgentConfig(
                 serverUrl,
@@ -55,8 +59,33 @@ public final class AgentConfigLoader {
                 fullAddress,
                 derpMapUrl,
                 Duration.ofSeconds(heartbeatSeconds),
-                Duration.ofSeconds(peerPingSeconds)
+                Duration.ofSeconds(peerPingSeconds),
+                virtualLan
         );
+    }
+
+    private VirtualLanAgentConfig virtualLan(JsonNode root, Path baseDir) {
+        boolean enabled = bool(root, "virtualLan.enabled", false);
+        String interfaceName = text(root, "virtualLan.interfaceName",
+                VirtualLanAgentConfig.DEFAULT_INTERFACE_NAME);
+        UUID adapterGuid = parseUuid(text(root, "virtualLan.adapterGuid",
+                VirtualLanAgentConfig.DEFAULT_ADAPTER_GUID.toString()));
+        String wintunValue = text(root, "virtualLan.wintunDll", "");
+        Path wintunDll = wintunValue.isBlank() ? null : resolve(baseDir, Path.of(wintunValue));
+        String sidecarValue = text(root, "virtualLan.tun2socksBinary", "");
+        Path sidecarBinary = sidecarValue.isBlank() ? null : resolve(baseDir, Path.of(sidecarValue));
+        String workingValue = text(root, "virtualLan.workingDirectory", "");
+        Path workingDirectory = workingValue.isBlank() ? null : resolve(baseDir, Path.of(workingValue));
+        int commandSeconds = boundedSeconds(root, "virtualLan.commandTimeoutSeconds", 15);
+        int startupSeconds = boundedSeconds(root, "virtualLan.startupTimeoutSeconds", 15);
+        try {
+            return new VirtualLanAgentConfig(
+                    enabled, interfaceName, adapterGuid, wintunDll, sidecarBinary,
+                    listText(root, "virtualLan.tun2socksArguments"), workingDirectory, null,
+                    Duration.ofSeconds(commandSeconds), Duration.ofSeconds(startupSeconds));
+        } catch (IllegalArgumentException exception) {
+            throw new AgentConfigException("TM-AGENT-010", "virtualLan configuration is invalid", exception);
+        }
     }
 
     private JsonNode readConfig(Path configPath) {
@@ -127,5 +156,34 @@ public final class AgentConfigLoader {
             throw new AgentConfigException("TM-AGENT-010", path + " must be between 1 and 86400");
         }
         return value;
+    }
+
+    private static List<String> listText(JsonNode root, String path) {
+        JsonNode current = root;
+        for (String segment : path.split("\\.")) {
+            current = current == null ? null : current.path(segment);
+        }
+        if (current == null || current.isMissingNode() || current.isNull()) {
+            return List.of();
+        }
+        if (!current.isArray()) {
+            throw new AgentConfigException("TM-AGENT-010", path + " must be a YAML list");
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : current) {
+            if (!item.isTextual() || item.asText().isBlank()) {
+                throw new AgentConfigException("TM-AGENT-010", path + " contains an invalid argument");
+            }
+            values.add(item.asText());
+        }
+        return List.copyOf(values);
+    }
+
+    private static UUID parseUuid(String value) {
+        try {
+            return UUID.fromString(value.trim());
+        } catch (RuntimeException exception) {
+            throw new AgentConfigException("TM-AGENT-010", "virtualLan.adapterGuid is invalid", exception);
+        }
     }
 }

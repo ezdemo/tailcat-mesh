@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronRight, Copy, Laptop, RefreshCw, Search, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react'
+import { Check, ChevronRight, Copy, Laptop, Network, RefreshCw, Search, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react'
 import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, formatRelativeDate, shorten, statusLabels, statusStyles } from '../../lib/format'
-import type { Device, DeviceStatus } from '../../types'
+import type { Device, DeviceStatus, DeviceVirtualNetwork } from '../../types'
 import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, Spinner, cn } from '../../components/ui'
 
 const filters: Array<{ value: 'ALL' | DeviceStatus; label: string }> = [
@@ -17,6 +17,7 @@ const filters: Array<{ value: 'ALL' | DeviceStatus; label: string }> = [
 export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUnauthorized: () => void }) {
   const [devices, setDevices] = useState<Device[]>([])
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
+  const [selectedVirtualNetworks, setSelectedVirtualNetworks] = useState<DeviceVirtualNetwork[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [actionId, setActionId] = useState<string | null>(null)
@@ -58,8 +59,14 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
 
   async function openDetails(device: Device) {
     setSelectedDevice(device)
+    setSelectedVirtualNetworks(device.virtualNetworks ?? [])
     try {
-      setSelectedDevice(await api.getDevice(device.id))
+      const [nextDevice, virtualNetworks] = await Promise.all([
+        api.getDevice(device.id),
+        api.listDeviceVirtualNetworks(device.id),
+      ])
+      setSelectedDevice(nextDevice)
+      setSelectedVirtualNetworks(virtualNetworks)
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
       setError(errorMessage(reason))
@@ -76,6 +83,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
       const updated = type === 'approve' ? await api.approveDevice(device.id) : await api.disableDevice(device.id)
       setDevices((current) => current.map((item) => item.id === updated.id ? updated : item))
       setSelectedDevice(updated)
+      setSelectedVirtualNetworks(updated.virtualNetworks ?? [])
       setNotice(type === 'approve' ? `${device.name} 已通过审批。` : `${device.name} 已禁用。`)
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
@@ -178,7 +186,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
         )}
       </Card>
 
-      <Modal open={selectedDevice !== null} onClose={() => setSelectedDevice(null)} title={selectedDevice?.name ?? '设备详情'} description={selectedDevice ? `${selectedDevice.hostname} · ${selectedDevice.os}/${selectedDevice.arch}` : undefined} size="lg">
+      <Modal open={selectedDevice !== null} onClose={() => { setSelectedDevice(null); setSelectedVirtualNetworks([]) }} title={selectedDevice?.name ?? '设备详情'} description={selectedDevice ? `${selectedDevice.hostname} · ${selectedDevice.os}/${selectedDevice.arch}` : undefined} size="lg">
         {selectedDevice && (
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -208,6 +216,13 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
             <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-100">
               <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Server ConnBlob hash</p>
               <p className="mt-2 break-all font-mono text-xs leading-5 text-slate-600">{selectedDevice.serverConnBlobHash ?? '尚未上报'}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-100">
+              <div className="flex items-center gap-2">
+                <Network className="h-4 w-4 text-indigo-500" aria-hidden="true" />
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Virtual Networks</p>
+              </div>
+              {selectedVirtualNetworks.length === 0 ? <p className="mt-3 text-sm text-slate-500">尚未加入 Virtual Network。</p> : <div className="mt-3 space-y-2">{selectedVirtualNetworks.map((network) => <div key={network.networkId} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-3 ring-1 ring-slate-100"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800">{network.networkName}</p><p className="mt-1 font-mono text-xs text-slate-500">{network.cidr}</p></div><div className="shrink-0 text-right"><p className="font-mono text-sm font-semibold text-indigo-700">{network.virtualIpv4}</p><p className={`mt-1 text-[11px] ${network.networkEnabled && network.memberEnabled ? 'text-emerald-600' : 'text-slate-400'}`}>{network.networkEnabled && network.memberEnabled ? '已启用' : '已停用'}</p></div></div>)}</div>}
             </div>
             <div className="grid gap-3 text-xs text-slate-500 sm:grid-cols-2">
               <p>创建于：<span className="font-medium text-slate-700">{formatDate(selectedDevice.createdAt)}</span></p>

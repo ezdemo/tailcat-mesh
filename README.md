@@ -6,7 +6,7 @@ Tailcat Mesh is not affiliated with, sponsored by, or endorsed by Tailscale Inc.
 
 ## 当前可用范围
 
-当前代码完成了规格说明书中的 M0/M1/M2/M3/M4/M5，并实现了 M6 Local Forward 核心闭环：
+当前代码完成了规格说明书中的 M0/M1/M2/M3/M4/M5/M6，并完成 M7.1–M7.10 TCP-first Virtual LAN 闭环：
 
 - Maven 多模块骨架：共享协议、Java Server、Java Agent。
 - Java 21 `TailcatEngine` / `TailcatCliEngine` 边界；业务代码不直接调用 `ProcessBuilder`。
@@ -17,9 +17,11 @@ Tailcat Mesh is not affiliated with, sponsored by, or endorsed by Tailscale Inc.
 - Service CRUD、动态 loopback ServiceBridge、Tailcat `--serve` 端口 reconcile，以及 Agent runtime 状态上报；管理员可以通过 Web 的“服务”页面发布设备可访问的 TCP 目标。
 - 每个已批准的远端 Peer 使用一个持久的官方 Tailcat SOCKS 进程；Agent 按约 30 秒周期执行 `ping`，Server 保存 Direct/DERP 路径、延迟和错误状态；管理员可以在 Web 的“连接”页面查看。
 - 管理员可以在 Web 的“转发”页面创建 Local Forward；源 Agent 固定监听 `127.0.0.1:<localPort>`，每条连接通过官方 Tailcat Peer SOCKS 执行 `CONNECT server.tailcat:<remoteBridgePort>`，并报告 READY/ERROR/STOPPED 状态。
+- M7.1 已提供 Virtual Network / Member 数据模型、Flyway 迁移、CIDR 重叠校验、稳定 Virtual IPv4 IPAM，以及 Web 的“网络”页面；M7.2 已接入每个 Device×MeshNetwork 独立 key/runtime、`--serve=all`、同网络 allowlist 与 ConnBlob 上报；M7.3/M7.4 已接入 Java TCP-first SOCKS 路由和 Network×Peer 组装；M7.5 已加入 Windows Wintun、Linux TUN、Mesh CIDR route、tun2socks Supervisor 的独立 Adapter/组合边界。
+- M7.6–M7.9 已把 Virtual Network 成员/设备投影、TCP-only 边界、Agent supervisor/reconnect、显式 allowlist、`--allow=none`、Network/Device 专属 server key 和撤销路径接入运行时；不使用 `--serve=exit-node`，不添加默认路由。M7.10 提供 Windows/Linux 特权 E2E 验收：虚拟 IP 稳定性、跨 Network 隔离、TCP 访问、Direct/DERP 路径、Agent 重启和成员移除撤销。
 - Agent 可打包为可执行 fat JAR，首次注册后把 Agent credential 保存到本地，重启时复用。
 
-Windows Service 安装与自动启动仍属于后续 M7；当前 Agent 以前台进程方式运行，已经可以提供用户侧的一行命令连接和本地 TCP 端口访问。
+Windows Service 安装与自动启动属于后续 M8 Packaging；当前 Agent 以前台进程方式运行，已经可以提供用户侧的一行命令连接和本地 TCP 端口访问。
 
 ## 用户端：一行命令连接
 
@@ -181,7 +183,7 @@ java -jar tailcat-mesh-server/target/tailcat-mesh-server-0.1.0-SNAPSHOT.jar
 ## 管理员 Web 控制面
 
 前端代码位于 `tailcat-mesh-web/`，当前已经对接 Server 的管理员功能：登录、
-设备列表/详情、设备审批与禁用、Enrollment Token 创建/列表/禁用、TCP 服务创建/修改/删除及运行态查看、Local Forward 创建/修改/删除及运行态查看、Peer Direct/DERP 连接状态查看。
+设备列表/详情、设备审批与禁用、Enrollment Token 创建/列表/禁用、Virtual Network 创建及成员/Virtual IPv4 管理、TCP 服务创建/修改/删除及运行态查看、Local Forward 创建/修改/删除及运行态查看、Peer Direct/DERP 连接状态查看。
 
 先启动 Server，再在另一个终端运行：
 
@@ -212,9 +214,18 @@ Agent Runtime 的真实 Tailcat E2E 测试：
 mvn -pl tailcat-mesh-agent "-Dtailcat.binary=C:/path/to/tailcat.exe" -Dtest=AgentRuntimeIntegrationTest test
 ```
 
+M7.10 Virtual LAN 特权 E2E（Windows 需要管理员 PowerShell、官方 Wintun DLL 和 tun2socks；Linux 需要 `/dev/net/tun`、`ip` 命令及相应权限）：
+
+```powershell
+mvn -q -pl tailcat-mesh-agent -am "-Dtest=TailcatVirtualLanE2eTest" "-Dtailcat.m7.e2e=true" "-Dtailcat.binary=.local/tailcat/v0.3.0/tailcat.exe" "-Dtailcat.tun2socks.binary=.local/m7-e2e/tun2socks-windows-amd64-v3.exe" "-Dtailcat.wintun.dll=.local/m7-e2e/wintun.dll" "-Dsurefire.failIfNoSpecifiedTests=false" test
+```
+
+不设置 `-Dtailcat.m7.e2e=true` 时，该特权测试会跳过；普通 Agent 回归不会修改主机 TUN 或路由。
+
 ## 设计边界与限制
 
-- 这不是系统级 VPN，不创建 TUN/TAP、Wintun 或虚拟 IP。
+- M7 Virtual LAN 已接入 Agent 的 opt-in 配置路径；启用后会创建/复用平台 TUN、配置 Mesh CIDR 路由，并通过本机 Java TCP SOCKS router 进入各 Network×Peer 的官方 Tailcat SOCKS。默认仍关闭，避免未明确授权时修改操作系统网络配置。
+- 即使 M7 完成，这也不是完整二层 LAN；当前只承诺 TCP 和虚拟 IPv4，不承诺 UDP、ICMP、mDNS、广播发现或默认路由接管。
 - 产品范围是 TCP Service Mesh；UDP、MagicDNS、Subnet Router 和 Exit Node 产品化不在当前阶段。
 - 修改 Tailcat allowlist 或 served ports 将重启子进程，并可能短暂中断连接。
 - Server key 使用官方 `genkey --fixed-region`；相同 Server key、region 和 served-port 配置重启时 ConnBlob 保持稳定，修改 served ports 会使 ConnBlob 变化并自动重新上报。

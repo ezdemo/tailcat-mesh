@@ -1,6 +1,7 @@
 package com.tailcatmesh.agent.tailcat;
 
 import com.tailcatmesh.agent.tailcat.model.TailcatServerConfig;
+import com.tailcatmesh.agent.tailcat.model.TailcatVirtualNetworkServerConfig;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -50,6 +51,40 @@ class TailcatCommandFactoryTest {
         assertEquals("--allow=none", factory.serverCommand(new TailcatServerConfig(
                 key, List.of(1), List.of("not-a-public-key"), false, null
         )).get(3));
+    }
+
+    @Test
+    void buildsIsolatedVirtualNetworkServerWithServeAll() {
+        Path binary = Path.of("tailcat").toAbsolutePath().normalize();
+        Path key = Path.of("identity", "virtual-networks", "network-id", "server.private.json")
+                .toAbsolutePath().normalize();
+        TailcatCommandFactory factory = new TailcatCommandFactory(binary);
+
+        assertEquals(List.of(
+                binary.toString(),
+                "--key=" + key,
+                "--serve=all",
+                "--allow=" + CLIENT_KEY,
+                "--full-address",
+                "--json"
+        ), factory.virtualNetworkServerCommand(new TailcatVirtualNetworkServerConfig(
+                key, List.of(CLIENT_KEY), true, null)));
+    }
+
+    @Test
+    void virtualNetworkWithoutPeersFailsClosedAndNeverUsesExitNode() {
+        Path binary = Path.of("tailcat").toAbsolutePath().normalize();
+        Path key = Path.of("identity", "virtual-networks", "network-id", "server.private.json")
+                .toAbsolutePath().normalize();
+        TailcatCommandFactory factory = new TailcatCommandFactory(binary);
+
+        List<String> command = factory.virtualNetworkServerCommand(
+                new TailcatVirtualNetworkServerConfig(key, List.of(), false, null));
+
+        assertEquals("--serve=all", command.get(2));
+        assertEquals("--allow=none", command.get(3));
+        assertEquals("--json", command.get(4));
+        assertEquals(false, command.stream().anyMatch(argument -> argument.contains("exit-node")));
     }
 
     @Test

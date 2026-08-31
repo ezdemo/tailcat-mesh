@@ -3,10 +3,16 @@ import type {
   CreatedEnrollmentToken,
   Connection,
   Device,
+  DeviceVirtualNetwork,
   EnrollmentToken,
   Forward,
   ForwardRequest,
   LoginResponse,
+  MeshNetwork,
+  MeshNetworkMember,
+  NetworkMemberRequest,
+  NetworkRequest,
+  NetworkUpdateRequest,
   Service,
   ServiceRequest,
   TokenCreateRequest,
@@ -80,6 +86,10 @@ export class TailcatMeshApi {
     return this.request<Device>(`/api/v1/devices/${encodeURIComponent(id)}`)
   }
 
+  async listDeviceVirtualNetworks(id: string): Promise<DeviceVirtualNetwork[]> {
+    return this.request<DeviceVirtualNetwork[]>(`/api/v1/devices/${encodeURIComponent(id)}/virtual-networks`)
+  }
+
   async approveDevice(id: string): Promise<Device> {
     return this.request<Device>(`/api/v1/devices/${encodeURIComponent(id)}/approve`, { method: 'POST' })
   }
@@ -149,6 +159,46 @@ export class TailcatMeshApi {
 
   async listConnections(): Promise<Connection[]> {
     return this.request<Connection[]>('/api/v1/connections')
+  }
+
+  async listNetworks(): Promise<MeshNetwork[]> {
+    return this.request<MeshNetwork[]>('/api/v1/networks')
+  }
+
+  async getNetwork(id: string): Promise<MeshNetwork> {
+    return this.request<MeshNetwork>(`/api/v1/networks/${encodeURIComponent(id)}`)
+  }
+
+  async createNetwork(request: NetworkRequest): Promise<MeshNetwork> {
+    return this.request<MeshNetwork>('/api/v1/networks', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+  }
+
+  async updateNetwork(id: string, request: NetworkUpdateRequest): Promise<MeshNetwork> {
+    return this.request<MeshNetwork>(`/api/v1/networks/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(request),
+    })
+  }
+
+  async deleteNetwork(id: string): Promise<void> {
+    await this.request<void>(`/api/v1/networks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  async addNetworkMember(id: string, request: NetworkMemberRequest): Promise<MeshNetworkMember> {
+    return this.request<MeshNetworkMember>(`/api/v1/networks/${encodeURIComponent(id)}/members`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+  }
+
+  async removeNetworkMember(networkId: string, deviceId: string): Promise<void> {
+    await this.request<void>(
+      `/api/v1/networks/${encodeURIComponent(networkId)}/members/${encodeURIComponent(deviceId)}`,
+      { method: 'DELETE' },
+    )
   }
 
   private async request<T>(path: string, options: RequestOptions = {}): Promise<T> {

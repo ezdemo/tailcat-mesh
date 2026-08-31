@@ -14,6 +14,7 @@ import com.tailcatmesh.agent.tailcat.model.TailcatServerConfig;
 import com.tailcatmesh.agent.tailcat.model.TailcatServerHandle;
 import com.tailcatmesh.agent.tailcat.model.TailcatTokenInfo;
 import com.tailcatmesh.agent.tailcat.model.TailcatVersion;
+import com.tailcatmesh.agent.tailcat.model.TailcatVirtualNetworkServerConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -52,8 +53,12 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
     private final TailcatVersion version;
     private final TailcatCompatibility compatibility;
     private final Object serverLock = new Object();
+    private final Object virtualNetworkServerLock = new Object();
     private final Object peerProxyLock = new Object();
     private final Map<UUID, TailcatPeerProxyHandle> peerProxies = new HashMap<>();
+    private final Map<VirtualPeerProxyKey, TailcatPeerProxyHandle> virtualPeerProxies = new HashMap<>();
+    private final Map<UUID, TailcatServerHandle> virtualNetworkServerHandles = new HashMap<>();
+    private final Map<UUID, Thread> virtualNetworkServerOutputMonitors = new HashMap<>();
 
     private volatile TailcatIdentity identity;
     private volatile TailcatServerHandle serverHandle;
@@ -217,6 +222,151 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
     }
 
     @Override
+    public void ensureVirtualNetworkServerKey(UUID networkId, Path serverKeyPath) {
+        ensureOpen();
+        Objects.requireNonNull(networkId, "networkId");
+        ensureKey(serverKeyPath, false);
+    }
+
+    @Override
+    public TailcatServerHandle startVirtualNetworkServer(
+            UUID networkId, TailcatVirtualNetworkServerConfig serverConfig) {
+        ensureOpen();
+        Objects.requireNonNull(networkId, "networkId");
+        Objects.requireNonNull(serverConfig, "serverConfig");
+        if (!Files.isRegularFile(serverConfig.serverKeyPath())) {
+            throw new TailcatEngineException("TM-AGENT-003",
+                    "virtual-network Tailcat server key does not exist");
+        }
+
+        synchronized (virtualNetworkServerLock) {
+            TailcatServerHandle existing = virtualNetworkServerHandles.get(networkId);
+            if (existing != null && existing.process().state() != ProcessState.STOPPED) {
+                throw new TailcatEngineException("TM-AGENT-003",
+                        "virtual-network Tailcat server is already running");
+            }
+            TailcatProcessSupervisor.ManagedProcessHandle process = supervisor.start(
+                    commandFactory.virtualNetworkServerCommand(serverConfig),
+                    config.workingDirectory(),
+                    config.environment(),
+                    true
+            );
+            try {
+                String jsonLine = process.awaitStdoutLine(config.startupTimeout());
+                String listenAddress = parser.parseServerListenAddress(jsonLine);
+                TailcatServerHandle handle = new TailcatServerHandle(
+                        process,
+                        listenAddress,
+                        process.startedAt() == null ? Instant.now() : process.startedAt()
+                );
+                virtualNetworkServerHandles.put(networkId, handle);
+                monitorVirtualNetworkServerOutput(networkId, process);
+                return handle;
+            } catch (TimeoutException exception) {
+                process.stop(PROCESS_STOP_TIMEOUT);
+                throw new TailcatEngineException("TM-AGENT-003",
+                        "virtual-network Tailcat server did not become ready", exception);
+            } catch (RuntimeException exception) {
+                process.stop(PROCESS_STOP_TIMEOUT);
+                throw exception;
+            }
+        }
+    }
+
+    @Override
+    public void stopVirtualNetworkServer(UUID networkId) {
+        if (networkId == null) {
+            return;
+        }
+        synchronized (virtualNetworkServerLock) {
+            Thread monitor = virtualNetworkServerOutputMonitors.remove(networkId);
+            if (monitor != null) {
+                monitor.interrupt();
+            }
+            TailcatServerHandle handle = virtualNetworkServerHandles.remove(networkId);
+            if (handle != null) {
+                handle.process().stop(PROCESS_STOP_TIMEOUT);
+            }
+        }
+    }
+
+    @Override
+    public TailcatPeerProxyHandle startVirtualNetworkPeerProxy(
+            UUID networkId, UUID peerDeviceId, String connBlob, TailcatPeerProxyConfig peerConfig) {
+        ensureOpen();
+        Objects.requireNonNull(networkId, "networkId");
+        Objects.requireNonNull(peerDeviceId, "peerDeviceId");
+        Objects.requireNonNull(peerConfig, "peerConfig");
+        if (connBlob == null || connBlob.isBlank()) {
+            throw new TailcatEngineException("TM-AGENT-005", "virtual peer ConnBlob is missing");
+        }
+        if (!Files.isRegularFile(peerConfig.clientKeyPath())) {
+            throw new TailcatEngineException("TM-AGENT-005", "Tailcat client key does not exist");
+        }
+
+        VirtualPeerProxyKey key = new VirtualPeerProxyKey(networkId, peerDeviceId);
+        synchronized (peerProxyLock) {
+            TailcatPeerProxyHandle existing = virtualPeerProxies.get(key);
+            if (existing != null
+                    && existing.connBlob().equals(connBlob)
+                    && existing.localSocksHost().equals(peerConfig.listenHost())
+                    && (peerConfig.listenPort() == 0 || existing.localSocksPort() == peerConfig.listenPort())
+                    && existing.process().state() != ProcessState.STOPPED) {
+                return existing;
+            }
+            if (existing != null) {
+                stopVirtualNetworkPeerProxyLocked(key, existing);
+            }
+
+            int requestedPort = peerConfig.listenPort();
+            String listenAddress = peerConfig.listenHost() + ":" + requestedPort;
+            TailcatProcessSupervisor.ManagedProcessHandle process = null;
+            try {
+                process = supervisor.start(
+                        commandFactory.peerSocksCommand(peerConfig.clientKeyPath(), connBlob, listenAddress),
+                        config.workingDirectory(), config.environment(), true);
+                TailcatCliParser.SocksListenAddress reported = awaitSocksReady(process);
+                if (!peerConfig.listenHost().equals(reported.host())
+                        || (requestedPort != 0 && requestedPort != reported.port())) {
+                    process.stop(PROCESS_STOP_TIMEOUT);
+                    throw new TailcatEngineException("TM-AGENT-005",
+                            "virtual peer SOCKS listen address did not match the requested loopback address");
+                }
+                TailcatPeerProxyHandle handle = new TailcatPeerProxyHandle(
+                        peerDeviceId, process, reported.host(), reported.port(), connBlob,
+                        process.startedAt() == null ? Instant.now() : process.startedAt());
+                virtualPeerProxies.put(key, handle);
+                return handle;
+            } catch (TimeoutException exception) {
+                if (process != null) {
+                    process.stop(PROCESS_STOP_TIMEOUT);
+                }
+                throw new TailcatEngineException("TM-AGENT-005",
+                        "virtual peer SOCKS did not become ready", exception);
+            } catch (TailcatEngineException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                throw new TailcatEngineException("TM-AGENT-005",
+                        "virtual peer SOCKS failed to start", exception);
+            }
+        }
+    }
+
+    @Override
+    public void stopVirtualNetworkPeerProxy(UUID networkId, UUID peerDeviceId) {
+        if (networkId == null || peerDeviceId == null) {
+            return;
+        }
+        VirtualPeerProxyKey key = new VirtualPeerProxyKey(networkId, peerDeviceId);
+        synchronized (peerProxyLock) {
+            TailcatPeerProxyHandle handle = virtualPeerProxies.remove(key);
+            if (handle != null) {
+                handle.process().stop(PROCESS_STOP_TIMEOUT);
+            }
+        }
+    }
+
+    @Override
     public TailcatPeerProxyHandle startPeerProxy(UUID peerDeviceId, String connBlob,
                                                   TailcatPeerProxyConfig peerConfig) {
         ensureOpen();
@@ -333,20 +483,17 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
     @Override
     public TailcatRuntimeStatus getRuntimeStatus() {
         TailcatServerHandle handle = serverHandle;
-        if (handle == null) {
+        return runtimeStatus(handle);
+    }
+
+    @Override
+    public TailcatRuntimeStatus getVirtualNetworkRuntimeStatus(UUID networkId) {
+        if (networkId == null) {
             return new TailcatRuntimeStatus(ProcessState.STOPPED, null, null, "", 0);
         }
-        ManagedProcess managedProcess = handle.process();
-        if (managedProcess instanceof TailcatProcessSupervisor.ManagedProcessHandle process) {
-            return new TailcatRuntimeStatus(
-                    process.state(),
-                    handle.listenAddress(),
-                    process.exitCode(),
-                    process.stderrTail(),
-                    process.restartCount()
-            );
+        synchronized (virtualNetworkServerLock) {
+            return runtimeStatus(virtualNetworkServerHandles.get(networkId));
         }
-        return new TailcatRuntimeStatus(managedProcess.state(), handle.listenAddress(), null, "", 0);
     }
 
     @Override
@@ -360,6 +507,22 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
                 entry.getValue().process().stop(PROCESS_STOP_TIMEOUT);
             }
             peerProxies.clear();
+            for (TailcatPeerProxyHandle handle : virtualPeerProxies.values()) {
+                handle.process().stop(PROCESS_STOP_TIMEOUT);
+            }
+            virtualPeerProxies.clear();
+        }
+        synchronized (virtualNetworkServerLock) {
+            for (UUID networkId : new java.util.ArrayList<>(virtualNetworkServerHandles.keySet())) {
+                Thread monitor = virtualNetworkServerOutputMonitors.remove(networkId);
+                if (monitor != null) {
+                    monitor.interrupt();
+                }
+                TailcatServerHandle handle = virtualNetworkServerHandles.remove(networkId);
+                if (handle != null) {
+                    handle.process().stop(PROCESS_STOP_TIMEOUT);
+                }
+            }
         }
         stopServer();
         supervisor.close();
@@ -459,6 +622,29 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
         handle.process().stop(PROCESS_STOP_TIMEOUT);
     }
 
+    private void stopVirtualNetworkPeerProxyLocked(VirtualPeerProxyKey key,
+                                                   TailcatPeerProxyHandle handle) {
+        virtualPeerProxies.remove(key);
+        handle.process().stop(PROCESS_STOP_TIMEOUT);
+    }
+
+    private static TailcatRuntimeStatus runtimeStatus(TailcatServerHandle handle) {
+        if (handle == null) {
+            return new TailcatRuntimeStatus(ProcessState.STOPPED, null, null, "", 0);
+        }
+        ManagedProcess managedProcess = handle.process();
+        if (managedProcess instanceof TailcatProcessSupervisor.ManagedProcessHandle process) {
+            return new TailcatRuntimeStatus(
+                    process.state(),
+                    handle.listenAddress(),
+                    process.exitCode(),
+                    process.stderrTail(),
+                    process.restartCount()
+            );
+        }
+        return new TailcatRuntimeStatus(managedProcess.state(), handle.listenAddress(), null, "", 0);
+    }
+
     /**
      * Consumes JSON emitted after a supervised process restart. Tailcat keeps
      * the same address when a stable server key is reused, but the monitor
@@ -510,11 +696,68 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
                 });
     }
 
+    /** Keeps one network's ConnBlob authoritative if its supervised process restarts. */
+    private void monitorVirtualNetworkServerOutput(UUID networkId,
+                                                   TailcatProcessSupervisor.ManagedProcessHandle process) {
+        Thread monitor = Thread.ofVirtual()
+                .name("tailcat-virtual-network-json-" + networkId)
+                .unstarted(() -> {
+                    try {
+                        while (!closed) {
+                            synchronized (virtualNetworkServerLock) {
+                                TailcatServerHandle handle = virtualNetworkServerHandles.get(networkId);
+                                if (handle == null || handle.process() != process) {
+                                    return;
+                                }
+                            }
+                            try {
+                                String line = process.awaitStdoutLine(Duration.ofMillis(500));
+                                String listenAddress = parser.parseServerListenAddress(line);
+                                synchronized (virtualNetworkServerLock) {
+                                    TailcatServerHandle handle = virtualNetworkServerHandles.get(networkId);
+                                    if (handle != null && handle.process() == process
+                                            && !handle.listenAddress().equals(listenAddress)) {
+                                        virtualNetworkServerHandles.put(networkId, new TailcatServerHandle(
+                                                process, listenAddress,
+                                                handle.startedAt() == null ? Instant.now() : handle.startedAt()));
+                                    }
+                                }
+                            } catch (TimeoutException exception) {
+                                if (process.state() == ProcessState.STOPPED
+                                        || (process.state() == ProcessState.STOPPING && !process.isAlive())) {
+                                    return;
+                                }
+                                sleepBriefly();
+                            } catch (TailcatEngineException exception) {
+                                LOGGER.debug("ignored non-JSON virtual-network Tailcat output");
+                            }
+                        }
+                    } finally {
+                        synchronized (virtualNetworkServerLock) {
+                            if (virtualNetworkServerOutputMonitors.get(networkId)
+                                    == Thread.currentThread()) {
+                                virtualNetworkServerOutputMonitors.remove(networkId);
+                            }
+                        }
+                    }
+                });
+        synchronized (virtualNetworkServerLock) {
+            Thread previous = virtualNetworkServerOutputMonitors.put(networkId, monitor);
+            if (previous != null) {
+                previous.interrupt();
+            }
+        }
+        monitor.start();
+    }
+
     private static void sleepBriefly() {
         try {
             Thread.sleep(100);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private record VirtualPeerProxyKey(UUID networkId, UUID peerDeviceId) {
     }
 }

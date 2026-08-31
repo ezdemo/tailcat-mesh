@@ -1,6 +1,7 @@
 package com.tailcatmesh.server.device;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /** Safe admin projection; the ConnBlob itself is deliberately omitted. */
@@ -19,14 +20,19 @@ public record DeviceView(
         Instant lastSeenAt,
         long desiredRevision,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        List<DeviceVirtualNetworkView> virtualNetworks
 ) {
+    public DeviceView {
+        virtualNetworks = virtualNetworks == null ? List.of() : List.copyOf(virtualNetworks);
+    }
+
     public static DeviceView from(DeviceRecord device) {
         return new DeviceView(
                 device.id(), device.networkId(), device.name(), device.hostname(), device.os(), device.arch(),
                 device.status(), device.agentVersion(), device.tailcatVersion(), device.clientPublicKey(),
                 device.serverConnBlobHash(), device.lastSeenAt(), device.desiredRevision(),
-                device.createdAt(), device.updatedAt()
+                device.createdAt(), device.updatedAt(), List.of()
         );
     }
 }

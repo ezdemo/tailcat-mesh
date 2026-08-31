@@ -8,6 +8,7 @@ import com.tailcatmesh.agent.tailcat.model.TailcatPingResult;
 import com.tailcatmesh.agent.tailcat.model.TailcatServerConfig;
 import com.tailcatmesh.agent.tailcat.model.TailcatServerHandle;
 import com.tailcatmesh.agent.tailcat.model.TailcatTokenInfo;
+import com.tailcatmesh.agent.tailcat.model.TailcatVirtualNetworkServerConfig;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,6 +20,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -136,6 +138,47 @@ class TailcatCliEngineIntegrationTest {
             } finally {
                 engine.stopServer();
             }
+        }
+    }
+
+    @Test
+    void startsAndStopsAnIndependentServeAllVirtualNetworkRuntime() throws IOException {
+        Path binary = configuredBinary();
+        Assumptions.assumeTrue(binary != null && Files.isRegularFile(binary),
+                "Set -Dtailcat.binary=<path to official tailcat v0.3.0> to run this integration test");
+
+        TailcatCliEngineConfig engineConfig = new TailcatCliEngineConfig(
+                binary,
+                Files.createDirectories(tempDir.resolve("virtual-network-work")),
+                Map.of("TS_DEBUG_TAILCAT_LOCAL_DERP", "1"),
+                Duration.ofSeconds(15),
+                Duration.ofSeconds(20),
+                false
+        );
+        UUID networkId = UUID.randomUUID();
+
+        try (TailcatCliEngine engine = new TailcatCliEngine(engineConfig)) {
+            TailcatIdentity identity = engine.ensureIdentity(new TailcatIdentityConfig(
+                    tempDir.resolve("virtual-network-identity/server.private.json"),
+                    tempDir.resolve("virtual-network-identity/client.private.json")
+            ));
+            Path virtualKey = tempDir.resolve("virtual-network-identity")
+                    .resolve("networks").resolve(networkId.toString()).resolve("server.private.json");
+            engine.ensureVirtualNetworkServerKey(networkId, virtualKey);
+            assertTrue(Files.isRegularFile(virtualKey));
+
+            TailcatServerHandle server = engine.startVirtualNetworkServer(networkId,
+                    new TailcatVirtualNetworkServerConfig(
+                            virtualKey, List.of(identity.clientPublicKey()), true, null));
+            assertTrue(server.listenAddress().startsWith("tc"));
+            assertEquals(ProcessState.RUNNING,
+                    engine.getVirtualNetworkRuntimeStatus(networkId).state());
+            assertNotNull(engine.parseToken(server.listenAddress()).serverPublicKey());
+
+            engine.stopVirtualNetworkServer(networkId);
+            assertEquals(ProcessState.STOPPED,
+                    engine.getVirtualNetworkRuntimeStatus(networkId).state());
+            assertFalse(((TailcatProcessSupervisor.ManagedProcessHandle) server.process()).isAlive());
         }
     }
 

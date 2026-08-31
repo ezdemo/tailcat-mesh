@@ -21,6 +21,17 @@ export interface Device {
   desiredRevision: number
   createdAt: string
   updatedAt: string
+  virtualNetworks?: DeviceVirtualNetwork[]
+}
+
+export interface DeviceVirtualNetwork {
+  networkId: string
+  networkName: string
+  networkSlug: string
+  cidr: string
+  virtualIpv4: string
+  networkEnabled: boolean
+  memberEnabled: boolean
 }
 
 export interface EnrollmentToken {
@@ -127,4 +138,61 @@ export interface Connection {
   directEndpoint: string | null
   lastCheckAt: string | null
   lastError: string | null
+}
+
+export interface MeshNetworkMember {
+  id: string
+  networkId: string
+  deviceId: string
+  deviceName: string
+  hostname: string
+  deviceStatus: DeviceStatus
+  virtualIpv4: string
+  joinedAt: string
+  enabled: boolean
+}
+
+export interface MeshNetwork {
+  id: string
+  name: string
+  slug: string
+  cidr: string
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+  members: MeshNetworkMember[]
+  peerPaths?: NetworkPeerPath[]
+}
+
+export type NetworkPeerStatus = 'ONLINE' | 'DEGRADED' | 'OFFLINE' | 'UNKNOWN' | 'STOPPED'
+export type NetworkPeerPathType = 'DIRECT' | 'DERP' | 'OFFLINE' | 'UNKNOWN'
+
+export interface NetworkPeerPath {
+  sourceDeviceId: string
+  sourceDeviceName: string
+  peerDeviceId: string
+  peerDeviceName: string
+  status: NetworkPeerStatus
+  pathType: NetworkPeerPathType
+  latencyMs: number | null
+  derpRegion: string | null
+  directEndpoint: string | null
+  lastCheckAt: string | null
+  lastError: string | null
+}
+
+export interface NetworkRequest {
+  name: string
+  cidr?: string
+}
+
+export interface NetworkUpdateRequest {
+  name?: string
+  cidr?: string
+  enabled?: boolean
+}
+
+export interface NetworkMemberRequest {
+  deviceId: string
+  virtualIpv4?: string
 }

@@ -42,6 +42,7 @@ WEB_ALLOWED_ORIGINS=https://admin.example.com
 - PENDING 设备审批；
 - 设备禁用；
 - Enrollment Token 创建、列表、复制和禁用；
+- M7.1 Virtual Network 创建、启停、删除、成员添加/移除和稳定 Virtual IPv4 查看；
 - TCP 服务创建、修改、删除，以及 Agent bridge 运行态查看。
 - Local Forward 创建、修改、删除，以及本地监听运行态查看；用户在源设备上访问 `127.0.0.1:<localPort>` 即可使用远端 TCP 服务。
 - Peer 连接的 ONLINE/DEGRADED/OFFLINE 状态、Direct/DERP 路径、延迟和最近错误查看。

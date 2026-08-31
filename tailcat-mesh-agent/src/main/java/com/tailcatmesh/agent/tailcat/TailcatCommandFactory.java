@@ -1,6 +1,7 @@
 package com.tailcatmesh.agent.tailcat;
 
 import com.tailcatmesh.agent.tailcat.model.TailcatServerConfig;
+import com.tailcatmesh.agent.tailcat.model.TailcatVirtualNetworkServerConfig;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -45,6 +46,28 @@ public final class TailcatCommandFactory {
                     .collect(Collectors.joining(",")));
         }
         // An empty or invalid allowlist fails closed. The flag is never omitted.
+        command.add("--allow=" + allowListArgument(config.allowedClientPublicKeys()));
+        if (config.fullAddress()) {
+            command.add("--full-address");
+        }
+        command.add("--json");
+        if (config.derpMapUrl() != null) {
+            command.add("--derpmap-url=" + validateDerpMapUrl(config.derpMapUrl()));
+        }
+        return List.copyOf(command);
+    }
+
+    /**
+     * Builds the isolated virtual-network server command required by M7.
+     * Virtual-network servers deliberately serve all TCP ports and never use
+     * Tailcat's exit-node mode.
+     */
+    public List<String> virtualNetworkServerCommand(TailcatVirtualNetworkServerConfig config) {
+        Objects.requireNonNull(config, "config");
+        List<String> command = new ArrayList<>();
+        command.add(binary.toString());
+        command.add("--key=" + pathArgument(config.serverKeyPath()));
+        command.add("--serve=all");
         command.add("--allow=" + allowListArgument(config.allowedClientPublicKeys()));
         if (config.fullAddress()) {
             command.add("--full-address");

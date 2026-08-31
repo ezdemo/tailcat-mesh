@@ -30,6 +30,11 @@ public final class DeviceController {
         return deviceService.get(id);
     }
 
+    @GetMapping("/{id}/virtual-networks")
+    public List<DeviceVirtualNetworkView> virtualNetworks(@PathVariable UUID id) {
+        return deviceService.virtualNetworks(id);
+    }
+
     @PostMapping("/{id}/approve")
     public DeviceView approve(@PathVariable UUID id) {
         return deviceService.approve(id);

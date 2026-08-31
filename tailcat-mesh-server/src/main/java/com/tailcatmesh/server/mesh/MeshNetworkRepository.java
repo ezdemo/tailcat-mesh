@@ -22,7 +22,7 @@ public class MeshNetworkRepository {
 
     public Optional<MeshNetworkRecord> findBySlug(String slug) {
         List<MeshNetworkRecord> networks = jdbcTemplate.query(
-                "SELECT id, name, slug, created_at, updated_at FROM mesh_networks WHERE slug = ?",
+                baseSelect() + " WHERE slug = ?",
                 this::map,
                 slug
         );
@@ -31,19 +31,54 @@ public class MeshNetworkRepository {
 
     public Optional<MeshNetworkRecord> findById(UUID id) {
         List<MeshNetworkRecord> networks = jdbcTemplate.query(
-                "SELECT id, name, slug, created_at, updated_at FROM mesh_networks WHERE id = ?",
+                baseSelect() + " WHERE id = ?",
                 this::map,
                 id
         );
         return networks.stream().findFirst();
     }
 
+    public List<MeshNetworkRecord> findAll() {
+        return jdbcTemplate.query(baseSelect() + " ORDER BY created_at, id", this::map);
+    }
+
     public void insert(MeshNetworkRecord network) {
+        String cidr = network.cidr();
+        if (cidr == null || cidr.isBlank()) {
+            cidr = VirtualIpam.nextDefaultCidr(findAllCidrs());
+        }
         jdbcTemplate.update(
-                "INSERT INTO mesh_networks (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                network.id(), network.name(), network.slug(),
+                "INSERT INTO mesh_networks (id, name, slug, cidr, enabled, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                network.id(), network.name(), network.slug(), cidr, network.enabled(),
                 Timestamp.from(network.createdAt()), Timestamp.from(network.updatedAt())
         );
+    }
+
+    public void update(MeshNetworkRecord network) {
+        int changed = jdbcTemplate.update(
+                "UPDATE mesh_networks SET name = ?, cidr = ?, enabled = ?, updated_at = ? WHERE id = ?",
+                network.name(), network.cidr(), network.enabled(),
+                Timestamp.from(network.updatedAt()), network.id()
+        );
+        if (changed == 0) {
+            throw new IllegalArgumentException("mesh network not found");
+        }
+    }
+
+    public boolean delete(UUID id) {
+        return jdbcTemplate.update("DELETE FROM mesh_networks WHERE id = ?", id) > 0;
+    }
+
+    public List<String> findAllCidrs() {
+        return jdbcTemplate.query(
+                "SELECT cidr FROM mesh_networks WHERE cidr IS NOT NULL ORDER BY created_at, id",
+                (resultSet, rowNum) -> resultSet.getString("cidr")
+        );
+    }
+
+    private String baseSelect() {
+        return "SELECT id, name, slug, cidr, enabled, created_at, updated_at FROM mesh_networks";
     }
 
     private MeshNetworkRecord map(ResultSet resultSet, int rowNum) throws SQLException {
@@ -53,6 +88,8 @@ public class MeshNetworkRepository {
                 UUID.fromString(resultSet.getString("id")),
                 resultSet.getString("name"),
                 resultSet.getString("slug"),
+                resultSet.getString("cidr"),
+                resultSet.getBoolean("enabled"),
                 createdAt.toInstant(),
                 updatedAt.toInstant()
         );

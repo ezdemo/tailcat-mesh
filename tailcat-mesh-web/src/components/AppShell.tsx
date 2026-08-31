@@ -15,11 +15,12 @@ import {
 } from 'lucide-react'
 import { cn } from './ui'
 
-export type ViewId = 'overview' | 'devices' | 'services' | 'forwards' | 'connections' | 'tokens'
+export type ViewId = 'overview' | 'devices' | 'networks' | 'services' | 'forwards' | 'connections' | 'tokens'
 
 const navigation: Array<{ id: ViewId; label: string; description: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: '总览', description: '控制面状态', icon: LayoutDashboard },
   { id: 'devices', label: '设备', description: '审批与状态', icon: MonitorSmartphone },
+  { id: 'networks', label: '网络', description: 'Virtual LAN', icon: Network },
   { id: 'services', label: '服务', description: '发布 TCP 服务', icon: Server },
   { id: 'forwards', label: '转发', description: '本地访问远端服务', icon: ArrowRightLeft },
   { id: 'connections', label: '连接', description: 'Direct / DERP 路径', icon: Cable },

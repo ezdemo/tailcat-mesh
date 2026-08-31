@@ -29,6 +29,7 @@ import com.tailcatmesh.agent.tailcat.model.TailcatPingResult;
 import com.tailcatmesh.agent.tailcat.model.TailcatRuntimeStatus;
 import com.tailcatmesh.agent.tailcat.model.TailcatServerConfig;
 import com.tailcatmesh.agent.tailcat.model.TailcatServerHandle;
+import com.tailcatmesh.agent.virtual.VirtualNetworkManager;
 import com.tailcatmesh.protocol.ProtocolEnvelope;
 import com.tailcatmesh.protocol.agent.AgentDesiredState;
 import com.tailcatmesh.protocol.agent.AgentEnrollmentResponse;
@@ -44,6 +45,8 @@ import com.tailcatmesh.protocol.agent.AgentRuntimeServerRequest;
 import com.tailcatmesh.protocol.agent.AgentService;
 import com.tailcatmesh.protocol.agent.AgentServiceRuntime;
 import com.tailcatmesh.protocol.agent.AgentServiceRuntimeReport;
+import com.tailcatmesh.protocol.agent.AgentVirtualNetworkRuntime;
+import com.tailcatmesh.protocol.agent.AgentVirtualNetworkRuntimeReport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -89,6 +92,7 @@ public final class AgentRuntime implements AutoCloseable {
     private final AgentStateStore stateStore;
     private final ServiceBridge serviceBridge;
     private final LocalForwardManager forwardManager;
+    private final VirtualNetworkManager virtualNetworkManager;
     private final String agentVersion;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final ScheduledExecutorService heartbeatExecutor =
@@ -123,7 +127,9 @@ public final class AgentRuntime implements AutoCloseable {
     private volatile boolean serviceRuntimeReported;
     private volatile boolean peerRuntimeReported;
     private volatile boolean forwardRuntimeReported;
+    private volatile boolean virtualNetworkRuntimeReported;
     private volatile List<AgentForwardRuntime> lastReportedForwardRuntimes = List.of();
+    private volatile List<AgentVirtualNetworkRuntime> lastReportedVirtualNetworkRuntimes = List.of();
     private volatile PrintWriter output;
     private final Object serverReconcileLock = new Object();
     private final Object desiredStateDebounceLock = new Object();
@@ -153,6 +159,7 @@ public final class AgentRuntime implements AutoCloseable {
         this.stateStore = Objects.requireNonNull(stateStore, "stateStore");
         this.serviceBridge = Objects.requireNonNull(serviceBridge, "serviceBridge");
         this.forwardManager = new LocalForwardManager(this::resolvePeerSocks);
+        this.virtualNetworkManager = new VirtualNetworkManager(config, tailcatEngine);
         if (agentVersion == null || agentVersion.isBlank()) {
             throw new IllegalArgumentException("agentVersion must not be blank");
         }
@@ -272,6 +279,19 @@ public final class AgentRuntime implements AutoCloseable {
                 LOGGER.debug("could not report Agent shutdown to control plane");
             }
         }
+        List<AgentVirtualNetworkRuntime> stoppedVirtualNetworks =
+                virtualNetworkManager.stopAll();
+        try {
+            if (!stoppedVirtualNetworks.isEmpty()) {
+                try {
+                    reportVirtualNetworkRuntimes(stoppedVirtualNetworks);
+                } catch (RuntimeException exception) {
+                    LOGGER.debug("could not report virtual-network shutdown to control plane");
+                }
+            }
+        } finally {
+            virtualNetworkManager.close();
+        }
         try {
             reportServiceRuntimes(stoppedServiceRuntimes());
         } catch (RuntimeException exception) {
@@ -351,6 +371,7 @@ public final class AgentRuntime implements AutoCloseable {
         refreshRuntimeState();
         refreshServiceRuntime();
         refreshForwardRuntime();
+        refreshVirtualNetworkRuntime();
         TailcatRuntimeStatus runtimeStatus = tailcatEngine.getRuntimeStatus();
         AgentHeartbeatResponse response = controlClient.heartbeat(
                 state.agentCredential(), new AgentHeartbeatRequest(
@@ -529,6 +550,7 @@ public final class AgentRuntime implements AutoCloseable {
             boolean shouldReportServices = false;
             boolean shouldReportPeers = false;
             boolean shouldReportForwards = false;
+            boolean shouldReportVirtualNetworks = false;
             synchronized (serverReconcileLock) {
                 if (!failOnError && desiredState != null && next.revision() < desiredRevision) {
                     return;
@@ -536,6 +558,8 @@ public final class AgentRuntime implements AutoCloseable {
                 boolean hadServices = !appliedServices.isEmpty();
                 boolean hadPeers = !appliedPeers.isEmpty();
                 boolean hadForwards = !appliedForwards.isEmpty();
+                List<AgentVirtualNetworkRuntime> previousVirtualNetworkRuntimes =
+                        virtualNetworkManager.snapshot();
                 boolean servicesChanged = reconcileServiceBridges(next.services());
                 TailcatServerConfig nextConfig = new TailcatServerConfig(
                         identity.serverKeyPath(),
@@ -561,6 +585,8 @@ public final class AgentRuntime implements AutoCloseable {
                 }
                 boolean peersChanged = reconcilePeerProxies(next.peers());
                 boolean forwardsChanged = reconcileLocalForwards(next.forwards());
+                List<AgentVirtualNetworkRuntime> currentVirtualNetworkRuntimes =
+                        virtualNetworkManager.reconcile(next.virtualNetworks());
                 shouldReportServices = servicesChanged || !next.services().isEmpty() && !serviceRuntimeReported
                         || next.services().isEmpty() && hadServices;
                 shouldReportPeers = peersChanged || !next.peers().isEmpty() && !peerRuntimeReported
@@ -568,6 +594,9 @@ public final class AgentRuntime implements AutoCloseable {
                 shouldReportForwards = forwardsChanged
                         || !next.forwards().isEmpty() && !forwardRuntimeReported
                         || next.forwards().isEmpty() && hadForwards;
+                shouldReportVirtualNetworks = !previousVirtualNetworkRuntimes.equals(currentVirtualNetworkRuntimes)
+                        || !next.virtualNetworks().isEmpty() && !virtualNetworkRuntimeReported
+                        || next.virtualNetworks().isEmpty() && !previousVirtualNetworkRuntimes.isEmpty();
             }
             if (shouldReportRuntime) {
                 reportRuntimeServer(true);
@@ -580,6 +609,9 @@ public final class AgentRuntime implements AutoCloseable {
             }
             if (shouldReportForwards) {
                 reportForwardRuntimes(forwardRuntimeSnapshot());
+            }
+            if (shouldReportVirtualNetworks) {
+                reportVirtualNetworkRuntimes(virtualNetworkManager.snapshot());
             }
         } catch (RuntimeException exception) {
             if (failOnError) {
@@ -964,6 +996,17 @@ public final class AgentRuntime implements AutoCloseable {
         lastReportedForwardRuntimes = snapshot;
     }
 
+    private void reportVirtualNetworkRuntimes(List<AgentVirtualNetworkRuntime> runtimes) {
+        if (state == null || runtimes == null) {
+            return;
+        }
+        List<AgentVirtualNetworkRuntime> snapshot = List.copyOf(runtimes);
+        controlClient.reportRuntimeVirtualNetworks(state.agentCredential(),
+                new AgentVirtualNetworkRuntimeReport(snapshot, Instant.now()));
+        virtualNetworkRuntimeReported = true;
+        lastReportedVirtualNetworkRuntimes = snapshot;
+    }
+
     private int readyServiceCount() {
         synchronized (serverReconcileLock) {
             return (int) serviceHandles.values().stream()
@@ -1030,6 +1073,29 @@ public final class AgentRuntime implements AutoCloseable {
         }
     }
 
+    private void refreshVirtualNetworkRuntime() {
+        AgentDesiredState current = desiredState;
+        if (current == null || current.virtualNetworks().isEmpty()) {
+            return;
+        }
+        List<AgentVirtualNetworkRuntime> before = virtualNetworkManager.snapshot();
+        boolean unhealthy = before.stream()
+                .anyMatch(runtime -> "ERROR".equals(runtime.status())
+                        || "STOPPED".equals(runtime.status()));
+        unhealthy = unhealthy || !virtualNetworkManager.isDataPlaneHealthy(current.virtualNetworks());
+        if (unhealthy) {
+            virtualNetworkManager.reconcile(current.virtualNetworks());
+        }
+        List<AgentVirtualNetworkRuntime> after = virtualNetworkManager.snapshot();
+        if (!after.equals(lastReportedVirtualNetworkRuntimes)) {
+            try {
+                reportVirtualNetworkRuntimes(after);
+            } catch (RuntimeException exception) {
+                LOGGER.warn("could not report virtual-network runtime; will retry");
+            }
+        }
+    }
+
     private List<AgentForwardRuntime> forwardRuntimeSnapshot() {
         synchronized (serverReconcileLock) {
             return appliedForwards.values().stream()
@@ -1065,7 +1131,7 @@ public final class AgentRuntime implements AutoCloseable {
     private AgentDesiredState normalizeDesiredState(AgentDesiredState candidate) {
         if (candidate == null) {
             return new AgentDesiredState(state.deviceId(), 0, List.of(), List.of(), List.of(),
-                    java.util.Map.of(), java.util.Map.of());
+                    List.of(), java.util.Map.of(), java.util.Map.of(), List.of());
         }
         if (candidate.deviceId() != null && !state.deviceId().equals(candidate.deviceId())) {
             throw new AgentControlException("TM-CTRL-004", 400,
@@ -1083,7 +1149,8 @@ public final class AgentRuntime implements AutoCloseable {
                 candidate.peers(),
                 candidate.forwards(),
                 candidate.derp(),
-                candidate.settings());
+                candidate.settings(),
+                candidate.virtualNetworks());
     }
 
     /** Reports the current ConnBlob only through the authenticated control channel. */

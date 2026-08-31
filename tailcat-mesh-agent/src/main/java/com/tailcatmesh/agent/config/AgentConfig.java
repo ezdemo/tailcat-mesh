@@ -15,8 +15,17 @@ public record AgentConfig(
         boolean fullAddress,
         String derpMapUrl,
         Duration heartbeatInterval,
-        Duration peerPingInterval
+        Duration peerPingInterval,
+        VirtualLanAgentConfig virtualLan
 ) {
+    public AgentConfig(URI serverUrl, Path tailcatBinary, Path dataDir,
+                       Path serverKeyPath, Path clientKeyPath, boolean fullAddress,
+                       String derpMapUrl, Duration heartbeatInterval,
+                       Duration peerPingInterval) {
+        this(serverUrl, tailcatBinary, dataDir, serverKeyPath, clientKeyPath, fullAddress,
+                derpMapUrl, heartbeatInterval, peerPingInterval, VirtualLanAgentConfig.disabled());
+    }
+
     public AgentConfig {
         serverUrl = validateServerUrl(serverUrl);
         tailcatBinary = normalize(Objects.requireNonNull(tailcatBinary, "tailcatBinary"));
@@ -29,6 +38,7 @@ public record AgentConfig(
         derpMapUrl = derpMapUrl == null || derpMapUrl.isBlank() ? null : derpMapUrl.trim();
         heartbeatInterval = positive(heartbeatInterval, "heartbeatInterval");
         peerPingInterval = positive(peerPingInterval, "peerPingInterval");
+        virtualLan = virtualLan == null ? VirtualLanAgentConfig.disabled() : virtualLan;
     }
 
     public URI endpoint(String path) {

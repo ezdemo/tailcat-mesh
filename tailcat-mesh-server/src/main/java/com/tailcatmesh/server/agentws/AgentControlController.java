@@ -12,8 +12,10 @@ import com.tailcatmesh.protocol.agent.AgentRuntimeServerRequest;
 import com.tailcatmesh.protocol.agent.AgentForwardRuntimeReport;
 import com.tailcatmesh.protocol.agent.AgentPeerRuntimeReport;
 import com.tailcatmesh.protocol.agent.AgentServiceRuntimeReport;
+import com.tailcatmesh.protocol.agent.AgentVirtualNetworkRuntimeReport;
 import com.tailcatmesh.server.peer.PeerService;
 import com.tailcatmesh.server.forward.ForwardService;
+import com.tailcatmesh.server.mesh.VirtualNetworkRuntimeService;
 import com.tailcatmesh.server.service.ServiceService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -37,18 +39,21 @@ public final class AgentControlController {
     private final ServiceService serviceService;
     private final PeerService peerService;
     private final ForwardService forwardService;
+    private final VirtualNetworkRuntimeService virtualNetworkRuntimeService;
 
     public AgentControlController(EnrollmentService enrollmentService, DeviceService deviceService,
                                   AgentDesiredStateService desiredStateService,
                                   ServiceService serviceService,
                                   PeerService peerService,
-                                  ForwardService forwardService) {
+                                  ForwardService forwardService,
+                                  VirtualNetworkRuntimeService virtualNetworkRuntimeService) {
         this.enrollmentService = enrollmentService;
         this.deviceService = deviceService;
         this.desiredStateService = desiredStateService;
         this.serviceService = serviceService;
         this.peerService = peerService;
         this.forwardService = forwardService;
+        this.virtualNetworkRuntimeService = virtualNetworkRuntimeService;
     }
 
     @PostMapping("/enroll")
@@ -94,6 +99,14 @@ public final class AgentControlController {
     public ResponseEntity<Void> runtimeForwards(HttpServletRequest request,
                                                  @RequestBody AgentForwardRuntimeReport runtime) {
         forwardService.recordRuntime(principal(request).deviceId(), runtime);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/runtime/virtual-networks")
+    public ResponseEntity<Void> runtimeVirtualNetworks(
+            HttpServletRequest request,
+            @RequestBody AgentVirtualNetworkRuntimeReport runtime) {
+        virtualNetworkRuntimeService.recordRuntime(principal(request).deviceId(), runtime);
         return ResponseEntity.noContent().build();
     }
 

@@ -6,9 +6,11 @@ import org.junit.jupiter.api.io.TempDir;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AgentConfigLoaderTest {
 
@@ -79,5 +81,36 @@ class AgentConfigLoaderTest {
                 """);
         assertThrows(AgentConfigException.class,
                 () -> new AgentConfigLoader().load(unsupported, null));
+    }
+
+    @Test
+    void loadsExplicitOptInVirtualLanConfiguration() throws Exception {
+        Path configPath = temporaryDirectory.resolve("virtual-lan.yml");
+        Files.writeString(configPath, """
+                server:
+                  url: http://127.0.0.1:8080
+                tailcat:
+                  binary: tailcat.exe
+                virtualLan:
+                  enabled: true
+                  interfaceName: Tailcat Mesh Test
+                  adapterGuid: 11111111-2222-3333-4444-555555555555
+                  wintunDll: tools/wintun.dll
+                  tun2socksBinary: tools/tun2socks.exe
+                  tun2socksArguments:
+                    - --device
+                    - ${tun}
+                    - --proxy
+                    - ${proxy}
+                """);
+
+        AgentConfig config = new AgentConfigLoader().load(configPath, null);
+
+        assertTrue(config.virtualLan().enabled());
+        assertEquals("Tailcat Mesh Test", config.virtualLan().interfaceName());
+        assertEquals(temporaryDirectory.resolve("tools/tun2socks.exe").toAbsolutePath().normalize(),
+                config.virtualLan().tun2socksBinary());
+        assertEquals(List.of("--device", "${tun}", "--proxy", "${proxy}"),
+                config.virtualLan().tun2socksArgumentTemplate());
     }
 }

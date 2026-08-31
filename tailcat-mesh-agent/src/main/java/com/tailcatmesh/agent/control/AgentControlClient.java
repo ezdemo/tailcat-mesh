@@ -13,6 +13,7 @@ import com.tailcatmesh.protocol.agent.AgentRuntimeServerRequest;
 import com.tailcatmesh.protocol.agent.AgentForwardRuntimeReport;
 import com.tailcatmesh.protocol.agent.AgentPeerRuntimeReport;
 import com.tailcatmesh.protocol.agent.AgentServiceRuntimeReport;
+import com.tailcatmesh.protocol.agent.AgentVirtualNetworkRuntimeReport;
 
 import java.io.IOException;
 import java.net.http.HttpClient;
@@ -69,6 +70,10 @@ public final class AgentControlClient {
 
     public void reportRuntimeForwards(String credential, AgentForwardRuntimeReport runtime) {
         sendJson("POST", "/api/v1/agent/runtime/forwards", runtime, credential, JsonNode.class);
+    }
+
+    public void reportRuntimeVirtualNetworks(String credential, AgentVirtualNetworkRuntimeReport runtime) {
+        sendJson("POST", "/api/v1/agent/runtime/virtual-networks", runtime, credential, JsonNode.class);
     }
 
     public CompletableFuture<WebSocket> openWebSocket(String credential, WebSocket.Listener listener) {

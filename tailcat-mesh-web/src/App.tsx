@@ -4,6 +4,7 @@ import { TailcatMeshApi, loadApiBaseUrl } from './api/client'
 import { LoginPage } from './features/auth/LoginPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { DevicesPage } from './features/devices/DevicesPage'
+import { NetworksPage } from './features/networks/NetworksPage'
 import { ServicesPage } from './features/services/ServicesPage'
 import { ForwardsPage } from './features/forwards/ForwardsPage'
 import { ConnectionsPage } from './features/connections/ConnectionsPage'
@@ -38,7 +39,7 @@ function readUsername(): string {
 
 function routeFromHash(): ViewId {
   const value = window.location.hash.replace(/^#/, '')
-  return value === 'devices' || value === 'services' || value === 'forwards' || value === 'connections' || value === 'tokens' ? value : 'overview'
+  return value === 'devices' || value === 'networks' || value === 'services' || value === 'forwards' || value === 'connections' || value === 'tokens' ? value : 'overview'
 }
 
 function App() {
@@ -102,6 +103,7 @@ function App() {
     <AppShell view={view} onNavigate={navigate} onLogout={() => void logout()} username={username} apiBaseUrl={apiBaseUrl}>
       {view === 'overview' && <DashboardPage api={api} onNavigate={navigate} onUnauthorized={clearSession} />}
       {view === 'devices' && <DevicesPage api={api} onUnauthorized={clearSession} />}
+      {view === 'networks' && <NetworksPage api={api} onUnauthorized={clearSession} />}
       {view === 'services' && <ServicesPage api={api} onUnauthorized={clearSession} />}
       {view === 'forwards' && <ForwardsPage api={api} onUnauthorized={clearSession} />}
       {view === 'connections' && <ConnectionsPage api={api} onUnauthorized={clearSession} />}
