@@ -23,9 +23,9 @@ management:
 
 tailcat-mesh:
   security:
-    require-https: true
+    require-https: false
   web:
-    allowed-origins: ${WEB_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+    allowed-origins: ${WEB_ALLOWED_ORIGINS:*}
   agent:
     heartbeat-timeout-seconds: 45
   enrollment:

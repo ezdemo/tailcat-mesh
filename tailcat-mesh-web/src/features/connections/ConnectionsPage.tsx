@@ -4,7 +4,8 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, formatRelativeDate, shorten } from '../../lib/format'
 import type { Connection, ConnectionPathType, ConnectionStatus } from '../../types'
-import { Badge, Button, Card, EmptyState, LoadingState, Notice, PageHeader } from '../../components/ui'
+import { useMessage } from '../../components/message'
+import { Badge, Button, Card, EmptyState, LoadingState, PageHeader } from '../../components/ui'
 
 const statusLabels: Record<ConnectionStatus, string> = {
   ONLINE: '在线',
@@ -32,22 +33,20 @@ const pathLabels: Record<ConnectionPathType, string> = {
 export function ConnectionsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUnauthorized: () => void }) {
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null)
+  const { showSuccess, showError } = useMessage()
 
-  async function load(showRefresh = false) {
-    setError(null)
-    showRefresh ? setRefreshing(true) : setLoading(true)
+  async function load(showRefresh = false, notify = false) {
+    if (!showRefresh) setLoading(true)
     try {
       setConnections(await api.listConnections())
       setLastLoadedAt(new Date().toISOString())
+      if (notify) showSuccess('连接数据已刷新。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '加载失败')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
@@ -70,10 +69,8 @@ export function ConnectionsPage({ api, onUnauthorized }: { api: TailcatMeshApi; 
         eyebrow="Peer connectivity"
         title="连接"
         description="查看每台 Agent 到同一 Mesh 中远端 Peer 的可达性。DERP 是正常的中继路径，不代表连接不可用。"
-        actions={<Button variant="secondary" loading={refreshing} onClick={() => void load(true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button>}
+        actions={<Button variant="secondary" onClick={() => void load(true, true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button>}
       />
-
-      {error && <Notice tone="error" title="加载失败" message={error} onClose={() => setError(null)} />}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard icon={Activity} label="在线 Peer" value={summary.online} tone="emerald" />

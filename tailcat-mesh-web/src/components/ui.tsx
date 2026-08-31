@@ -1,5 +1,5 @@
 import { useId, type ButtonHTMLAttributes, type ComponentType, type HTMLAttributes, type ReactNode } from 'react'
-import { AlertCircle, CheckCircle2, Info, LoaderCircle, X } from 'lucide-react'
+import { LoaderCircle, X } from 'lucide-react'
 
 export function cn(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(' ')
@@ -11,12 +11,10 @@ export function Button({
   children,
   className,
   variant = 'primary',
-  loading = false,
   disabled,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant
-  loading?: boolean
 }) {
   const variants: Record<ButtonVariant, string> = {
     primary: 'bg-ink text-white shadow-card hover:bg-slate-800 focus-visible:outline-ink',
@@ -31,12 +29,9 @@ export function Button({
         variants[variant],
         className,
       )}
-      disabled={disabled || loading}
+      disabled={disabled}
       {...props}
     >
-      <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">
-        <LoaderCircle className={cn('h-4 w-4', loading ? 'animate-spin' : 'invisible')} />
-      </span>
       {children}
     </button>
   )
@@ -73,39 +68,6 @@ export function PageHeader({
         {description && <p className="mt-4 max-w-2xl text-sm leading-5 text-slate-500">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-3">{actions}</div>}
-    </div>
-  )
-}
-
-export function Notice({
-  tone = 'info',
-  title,
-  message,
-  onClose,
-}: {
-  tone?: 'info' | 'success' | 'error'
-  title?: string
-  message: string
-  onClose?: () => void
-}) {
-  const tones = {
-    info: 'bg-sky-50 text-sky-800 ring-sky-200',
-    success: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
-    error: 'bg-rose-50 text-rose-800 ring-rose-200',
-  }
-  const Icon = tone === 'error' ? AlertCircle : tone === 'success' ? CheckCircle2 : Info
-  return (
-    <div className={cn('flex items-start gap-3 rounded-lg px-4 py-3 text-sm ring-1', tones[tone])} role={tone === 'error' ? 'alert' : 'status'}>
-      <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <div className="min-w-0 flex-1">
-        {title && <p className="font-semibold">{title}</p>}
-        <p className={title ? 'mt-0.5' : ''}>{message}</p>
-      </div>
-      {onClose && (
-        <button className="flex min-h-11 min-w-11 items-center justify-center rounded p-1 opacity-70 transition hover:opacity-100" onClick={onClose} aria-label="关闭提示">
-          <X className="h-4 w-4" aria-hidden="true" />
-        </button>
-      )}
     </div>
   )
 }

@@ -16,14 +16,29 @@ public record AgentConfig(
         String derpMapUrl,
         Duration heartbeatInterval,
         Duration peerPingInterval,
-        VirtualLanAgentConfig virtualLan
+        VirtualLanAgentConfig virtualLan,
+        boolean tailcatAutoDownload,
+        String tailcatVersion
 ) {
+    public static final String DEFAULT_TAILCAT_VERSION = "0.3.0";
+
     public AgentConfig(URI serverUrl, Path tailcatBinary, Path dataDir,
                        Path serverKeyPath, Path clientKeyPath, boolean fullAddress,
                        String derpMapUrl, Duration heartbeatInterval,
                        Duration peerPingInterval) {
         this(serverUrl, tailcatBinary, dataDir, serverKeyPath, clientKeyPath, fullAddress,
-                derpMapUrl, heartbeatInterval, peerPingInterval, VirtualLanAgentConfig.disabled());
+                derpMapUrl, heartbeatInterval, peerPingInterval,
+                VirtualLanAgentConfig.disabled(), false, DEFAULT_TAILCAT_VERSION);
+    }
+
+    /** Backwards-compatible constructor for callers that provide Virtual LAN settings. */
+    public AgentConfig(URI serverUrl, Path tailcatBinary, Path dataDir,
+                       Path serverKeyPath, Path clientKeyPath, boolean fullAddress,
+                       String derpMapUrl, Duration heartbeatInterval,
+                       Duration peerPingInterval, VirtualLanAgentConfig virtualLan) {
+        this(serverUrl, tailcatBinary, dataDir, serverKeyPath, clientKeyPath, fullAddress,
+                derpMapUrl, heartbeatInterval, peerPingInterval, virtualLan,
+                false, DEFAULT_TAILCAT_VERSION);
     }
 
     public AgentConfig {
@@ -39,6 +54,7 @@ public record AgentConfig(
         heartbeatInterval = positive(heartbeatInterval, "heartbeatInterval");
         peerPingInterval = positive(peerPingInterval, "peerPingInterval");
         virtualLan = virtualLan == null ? VirtualLanAgentConfig.disabled() : virtualLan;
+        tailcatVersion = normalizeTailcatVersion(tailcatVersion);
     }
 
     public URI endpoint(String path) {
@@ -81,5 +97,18 @@ public record AgentConfig(
             throw new AgentConfigException("TM-AGENT-010", name + " must be positive");
         }
         return value;
+    }
+
+    private static String normalizeTailcatVersion(String value) {
+        String normalized = value == null || value.isBlank()
+                ? DEFAULT_TAILCAT_VERSION : value.trim();
+        if (normalized.startsWith("v") || normalized.startsWith("V")) {
+            normalized = normalized.substring(1);
+        }
+        if (!normalized.matches("\\d+\\.\\d+\\.\\d+")) {
+            throw new AgentConfigException("TM-AGENT-010",
+                    "tailcat.version must be a semantic version such as 0.3.0");
+        }
+        return normalized;
     }
 }

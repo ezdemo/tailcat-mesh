@@ -9,12 +9,14 @@ import com.tailcatmesh.agent.control.AgentControlClient;
 import com.tailcatmesh.agent.control.AgentControlException;
 import com.tailcatmesh.agent.identity.AgentStateStore;
 import com.tailcatmesh.agent.service.ServiceBridgeException;
+import com.tailcatmesh.agent.tailcat.TailcatBinaryDownloader;
 import com.tailcatmesh.agent.tailcat.TailcatCliEngine;
 import com.tailcatmesh.agent.tailcat.TailcatCliEngineConfig;
 import com.tailcatmesh.agent.tailcat.TailcatEngineException;
 
 import java.io.PrintWriter;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 
@@ -39,8 +41,14 @@ public final class AgentCli {
             AgentConfig config = loader.load(options.configPath(), new AgentConfigOverrides(
                     options.serverUrl(), options.tailcatBinary(), options.dataDir()));
             Files.createDirectories(config.dataDir());
+            if (config.tailcatAutoDownload() && !Files.isRegularFile(config.tailcatBinary())) {
+                stdout.println("Downloading official Tailcat " + config.tailcatVersion()
+                        + " for " + TailcatBinaryDownloader.currentPlatform() + "...");
+            }
+            Path tailcatBinary = new TailcatBinaryDownloader().ensure(
+                    config.tailcatBinary(), config.tailcatVersion(), config.tailcatAutoDownload());
             TailcatCliEngine engine = new TailcatCliEngine(new TailcatCliEngineConfig(
-                    config.tailcatBinary(),
+                    tailcatBinary,
                     config.dataDir(),
                     Map.of(),
                     Duration.ofSeconds(15),
@@ -107,5 +115,9 @@ public final class AgentCli {
         output.println("  --data-dir <path>        local identity/state directory; overrides YAML");
         output.println("  --once                   start, report, then stop (diagnostic mode)");
         output.println("  --version                print Agent version");
+        output.println();
+        output.println("YAML tailcat settings:");
+        output.println("  tailcat.version          pinned official Tailcat release (default: 0.3.0)");
+        output.println("  tailcat.autoDownload     download absent binary to ~/.tailcat-mesh");
     }
 }

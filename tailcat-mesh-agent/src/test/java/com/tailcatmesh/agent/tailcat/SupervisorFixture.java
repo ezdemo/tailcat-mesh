@@ -9,7 +9,10 @@ public final class SupervisorFixture {
     public static void main(String[] args) throws InterruptedException {
         System.out.println("ready");
         System.out.flush();
-        System.err.println("stderr-line");
+        String stderr = args.length > 0 && "diagnostics".equals(args[0])
+                ? "stderr-line tcSensitiveConnBlob123456789"
+                : "stderr-line";
+        System.err.println(stderr);
         System.err.flush();
         Thread.sleep(300_000);
     }

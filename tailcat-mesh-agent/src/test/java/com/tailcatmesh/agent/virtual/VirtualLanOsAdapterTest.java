@@ -102,6 +102,9 @@ class VirtualLanOsAdapterTest {
                 WindowsWintunRuntime.DEFAULT_ADAPTER_GUID,
                 List.of(Ipv4Cidr.parse("10.77.0.2/24")), null);
 
+        runtime.prepare(config);
+        assertTrue(executor.commands.stream().anyMatch(command -> command.get(0).equals("powershell.exe")
+                && command.contains("-Command") && command.get(command.size() - 1).contains("pnputil.exe")));
         TunHandle handle = runtime.open(config);
         assertEquals(WindowsWintunRuntime.DEFAULT_INTERFACE_NAME, provider.interfaceName);
         assertEquals(WindowsWintunRuntime.DEFAULT_ADAPTER_GUID, provider.guid);

@@ -617,7 +617,8 @@ public final class AgentRuntime implements AutoCloseable {
             if (failOnError) {
                 throw exception;
             }
-            LOGGER.warn("Tailcat Server desired-state reconcile failed; will retry on the next sync");
+            LOGGER.warn("Tailcat Server desired-state reconcile failed; will retry on the next sync: {}",
+                    exception.getMessage(), exception);
         }
     }
 
@@ -737,8 +738,14 @@ public final class AgentRuntime implements AutoCloseable {
                 peerHandles.remove(peer.peerDeviceId());
                 peerRuntimes.put(peer.peerDeviceId(), peerRuntime(
                         peer, "DEGRADED", TailcatPathType.UNKNOWN, -1, null, null,
-                        "Peer SOCKS failed to start"));
-                LOGGER.warn("Peer SOCKS could not start; path checks will retry");
+                        safeError(exception)));
+                LOGGER.warn(
+                        "Peer SOCKS could not start for peer {} (connBlobHash={}); "
+                                + "path checks will retry: {}",
+                        peer.peerDeviceId(),
+                        hashConnBlob(peer.connBlob()),
+                        exception.getMessage(),
+                        exception);
             }
             changed = true;
         }
@@ -848,7 +855,8 @@ public final class AgentRuntime implements AutoCloseable {
         try {
             refreshPeerPaths();
         } catch (RuntimeException exception) {
-            LOGGER.warn("peer path refresh failed; will retry on the next interval");
+            LOGGER.warn("peer path refresh failed; will retry on the next interval: {}",
+                    exception.getMessage(), exception);
         }
     }
 
@@ -890,14 +898,17 @@ public final class AgentRuntime implements AutoCloseable {
                 updatePeerRuntime(peerRuntime(peer, status, result.pathType(), result.latencyMs(),
                         result.derpRegion(), result.endpoint(), null));
             } catch (RuntimeException exception) {
+                LOGGER.warn("Tailcat peer ping failed for peer {}; will retry on the next interval: {}",
+                        peer.peerDeviceId(), exception.getMessage(), exception);
                 updatePeerRuntime(peerRuntime(peer, "DEGRADED", TailcatPathType.UNKNOWN, -1,
-                        null, null, "Tailcat peer ping failed"));
+                        null, null, safeError(exception)));
             }
         }
         try {
             reportPeerRuntimes(peerRuntimeSnapshot());
         } catch (RuntimeException exception) {
-            LOGGER.warn("could not report Peer path state; will retry on the next interval");
+            LOGGER.warn("could not report Peer path state; will retry on the next interval: {}",
+                    exception.getMessage(), exception);
         }
     }
 
@@ -1242,6 +1253,7 @@ public final class AgentRuntime implements AutoCloseable {
         if (message == null || message.isBlank()) {
             message = exception == null ? "Local Forward failed" : exception.getClass().getSimpleName();
         }
+        message = message.replace("\r", "\\r").replace("\n", "\\n");
         return message.length() <= 2_000 ? message : message.substring(0, 2_000);
     }
 

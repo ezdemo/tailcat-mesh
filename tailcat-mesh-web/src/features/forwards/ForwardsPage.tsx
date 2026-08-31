@@ -4,7 +4,8 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, shorten } from '../../lib/format'
 import type { Device, Forward, ForwardRequest, ForwardStatus, Service } from '../../types'
-import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader } from '../../components/ui'
+import { useMessage } from '../../components/message'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, PageHeader } from '../../components/ui'
 
 const statusLabels: Record<ForwardStatus, string> = {
   STARTING: '启动中',
@@ -41,20 +42,15 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
   const [devices, setDevices] = useState<Device[]>([])
   const [services, setServices] = useState<Service[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Forward | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Forward | null>(null)
   const [form, setForm] = useState<ForwardFormState>(emptyForm)
-  const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null)
+  const { showSuccess, showError } = useMessage()
 
-  async function load(showRefresh = false) {
-    setError(null)
-    showRefresh ? setRefreshing(true) : setLoading(true)
+  async function load(showRefresh = false, notify = false) {
+    if (!showRefresh) setLoading(true)
     try {
       const [nextForwards, nextDevices, nextServices] = await Promise.all([
         api.listForwards(),
@@ -65,12 +61,12 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
       setDevices(nextDevices)
       setServices(nextServices)
       setLastLoadedAt(new Date().toISOString())
+      if (notify) showSuccess('转发数据已刷新。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '加载失败')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
@@ -95,7 +91,6 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
   function openCreate() {
     setEditing(null)
     setForm({ ...emptyForm, sourceDeviceId: usableDevices[0]?.id ?? '' })
-    setError(null)
     setFormOpen(true)
   }
 
@@ -108,14 +103,11 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
       localBindPort: String(forward.localBindPort),
       enabled: forward.enabled,
     })
-    setError(null)
     setFormOpen(true)
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSaving(true)
-    setError(null)
     const request: ForwardRequest = {
       sourceDeviceId: form.sourceDeviceId,
       remoteServiceId: form.remoteServiceId,
@@ -132,29 +124,23 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
         ? current.map((forward) => forward.id === saved.id ? saved : forward)
         : [saved, ...current])
       setFormOpen(false)
-      setNotice(editing ? '转发配置已更新，Agent 将在同步后重建本地监听。' : '转发已创建，Agent 将在同步后监听本地端口。')
+      showSuccess(editing ? '转发配置已更新，Agent 将在同步后重建本地监听。' : '转发已创建，Agent 将在同步后监听本地端口。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
-    } finally {
-      setSaving(false)
+      showError(errorMessage(reason), '保存失败')
     }
   }
 
   async function remove() {
     if (!deleteTarget) return
-    setDeletingId(deleteTarget.id)
-    setError(null)
     try {
       await api.deleteForward(deleteTarget.id)
       setForwards((current) => current.filter((forward) => forward.id !== deleteTarget.id))
       setDeleteTarget(null)
-      setNotice('转发已删除。')
+      showSuccess('转发已删除。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
-    } finally {
-      setDeletingId(null)
+      showError(errorMessage(reason), '删除失败')
     }
   }
 
@@ -168,13 +154,8 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
         eyebrow="Local forwards"
         title="本地转发"
         description="把远端设备发布的 TCP 服务映射到当前设备的本机回环端口。用户只需连接 127.0.0.1:<端口>，不需要了解 Tailcat 协议。"
-        actions={<><Button variant="secondary" loading={refreshing} onClick={() => void load(true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button><Button onClick={openCreate} disabled={usableDevices.length < 1}><Plus className="h-4 w-4" aria-hidden="true" />新建转发</Button></>}
+        actions={<><Button variant="secondary" onClick={() => void load(true, true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button><Button onClick={openCreate} disabled={usableDevices.length < 1}><Plus className="h-4 w-4" aria-hidden="true" />新建转发</Button></>}
       />
-
-      <div className="space-y-4">
-        {error && <Notice tone="error" title="操作失败" message={error} onClose={() => setError(null)} />}
-        {notice && <Notice tone="success" message={notice} onClose={() => setNotice(null)} />}
-      </div>
 
       <div className="mt-6 flex items-start gap-3 rounded-2xl bg-indigo-50 px-5 py-4 text-sm leading-6 text-indigo-800 ring-1 ring-indigo-100">
         <ArrowRightLeft className="mt-0.5 h-5 w-5 shrink-0 text-indigo-600" aria-hidden="true" />
@@ -223,12 +204,12 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
           <label className="block"><span className="text-sm font-semibold text-slate-700">远端 TCP 服务</span><select required value={form.remoteServiceId} onChange={(event) => setForm({ ...form, remoteServiceId: event.target.value })} className="mt-2 block w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200 focus:bg-white focus:ring-2 focus:ring-indigo-600"><option value="" disabled>选择同一 Mesh 中的远端服务</option>{availableRemoteServices.map((service) => <option key={service.id} value={service.id}>{service.name} · {deviceById.get(service.deviceId)?.name ?? shorten(service.deviceId)} · {service.targetHost}:{service.targetPort}</option>)}</select><span className="mt-2 block text-xs text-slate-400">不能选择源设备自己的服务；远端服务需要由它所属 Agent 提供。</span></label>
           <div className="grid gap-4 sm:grid-cols-[1fr_10rem]"><label className="block"><span className="text-sm font-semibold text-slate-700">本地绑定地址</span><input value="127.0.0.1" readOnly className="mt-2 block w-full rounded-xl border-0 bg-slate-100 px-4 py-3 font-mono text-sm text-slate-600 ring-1 ring-inset ring-slate-200" /><span className="mt-2 block text-xs text-slate-400">仅允许回环访问。</span></label><label className="block"><span className="text-sm font-semibold text-slate-700">本地端口</span><input required min="1" max="65535" type="number" value={form.localBindPort} onChange={(event) => setForm({ ...form, localBindPort: event.target.value })} className="mt-2 block w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200 focus:bg-white focus:ring-2 focus:ring-indigo-600" /></label></div>
           <label className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-100"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600" /><span><span className="font-semibold">启用转发</span><span className="mt-0.5 block text-xs text-slate-400">关闭后保留配置，但 Agent 会停止本地监听。</span></span></label>
-          <div className="flex justify-end gap-3"><Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>取消</Button><Button type="submit" loading={saving} disabled={!form.sourceDeviceId || !form.remoteServiceId}><Check className="h-4 w-4" aria-hidden="true" />{editing ? '保存修改' : '创建转发'}</Button></div>
+          <div className="flex justify-end gap-3"><Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>取消</Button><Button type="submit" disabled={!form.sourceDeviceId || !form.remoteServiceId}><Check className="h-4 w-4" aria-hidden="true" />{editing ? '保存修改' : '创建转发'}</Button></div>
         </form>
       </Modal>
 
       <Modal open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} title="删除这个转发？" description={deleteTarget?.name}>
-        <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800 ring-1 ring-rose-200"><XCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" /><p>删除后，源设备上的本地监听会停止，用户将不能再通过该地址访问远端服务。此操作不可撤销。</p></div><div className="flex justify-end gap-3"><Button variant="secondary" onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deletingId === deleteTarget?.id} onClick={() => void remove()}><Trash2 className="h-4 w-4" aria-hidden="true" />确认删除</Button></div></div>
+        <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800 ring-1 ring-rose-200"><XCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" /><p>删除后，源设备上的本地监听会停止，用户将不能再通过该地址访问远端服务。此操作不可撤销。</p></div><div className="flex justify-end gap-3"><Button variant="secondary" onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" onClick={() => void remove()}><Trash2 className="h-4 w-4" aria-hidden="true" />确认删除</Button></div></div>
       </Modal>
 
       {forwards.length > 0 && lastLoadedAt && <p className="mt-4 text-xs text-slate-400">最后一次列表刷新：{formatDate(lastLoadedAt)}。运行态来自 Agent 上报；目标服务未就绪时，本地端口仍会保留并在连接时返回明确错误。</p>}

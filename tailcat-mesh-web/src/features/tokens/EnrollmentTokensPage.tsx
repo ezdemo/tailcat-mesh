@@ -4,33 +4,30 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, isTokenActive } from '../../lib/format'
 import type { CreatedEnrollmentToken, EnrollmentToken } from '../../types'
-import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader } from '../../components/ui'
+import { useMessage } from '../../components/message'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, PageHeader } from '../../components/ui'
 
 export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUnauthorized: () => void }) {
   const [tokens, setTokens] = useState<EnrollmentToken[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [creating, setCreating] = useState(false)
   const [disablingId, setDisablingId] = useState<string | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [createdToken, setCreatedToken] = useState<CreatedEnrollmentToken | null>(null)
   const [confirmDisable, setConfirmDisable] = useState<EnrollmentToken | null>(null)
   const [maxUses, setMaxUses] = useState('1')
   const [expiresInHours, setExpiresInHours] = useState('24')
-  const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
+  const { showSuccess, showError } = useMessage()
 
-  async function load(showRefresh = false) {
-    setError(null)
-    showRefresh ? setRefreshing(true) : setLoading(true)
+  async function load(showRefresh = false, notify = false) {
+    if (!showRefresh) setLoading(true)
     try {
       setTokens(await api.listEnrollmentTokens())
+      if (notify) showSuccess('加入凭证已刷新。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '加载失败')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
@@ -42,8 +39,6 @@ export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMesh
 
   async function createToken(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setCreating(true)
-    setError(null)
     try {
       const created = await api.createEnrollmentToken({
         maxUses: Number(maxUses),
@@ -64,24 +59,21 @@ export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMesh
       setExpiresInHours('24')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
-    } finally {
-      setCreating(false)
+      showError(errorMessage(reason), '创建失败')
     }
   }
 
   async function disableToken() {
     if (!confirmDisable) return
     setDisablingId(confirmDisable.id)
-    setError(null)
     try {
       await api.disableEnrollmentToken(confirmDisable.id)
       setTokens((current) => current.map((token) => token.id === confirmDisable.id ? { ...token, enabled: false } : token))
-      setNotice('加入凭证已禁用。')
+      showSuccess('加入凭证已禁用。')
       setConfirmDisable(null)
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '禁用失败')
     } finally {
       setDisablingId(null)
     }
@@ -91,9 +83,9 @@ export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMesh
     if (!createdToken) return
     try {
       await navigator.clipboard.writeText(createdToken.token)
-      setNotice('加入凭证已复制。')
+      showSuccess('加入凭证已复制。')
     } catch {
-      setError('无法复制加入凭证，请手动选择文本。')
+      showError('无法复制加入凭证，请手动选择文本。', '复制失败')
     }
   }
 
@@ -103,13 +95,8 @@ export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMesh
         eyebrow="Enrollment"
         title="加入凭证"
         description="创建一次性凭证，让新的 Java Agent 注册到这个控制面。原始凭证只会在创建后显示一次。"
-        actions={<><Button variant="secondary" loading={refreshing} onClick={() => void load(true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button><Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" aria-hidden="true" />创建凭证</Button></>}
+        actions={<><Button variant="secondary" onClick={() => void load(true, true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button><Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" aria-hidden="true" />创建凭证</Button></>}
       />
-
-      <div className="space-y-4">
-        {error && <Notice tone="error" title="操作失败" message={error} onClose={() => setError(null)} />}
-        {notice && <Notice tone="success" message={notice} onClose={() => setNotice(null)} />}
-      </div>
 
       <div className="mt-6 flex items-center gap-3 rounded-2xl bg-indigo-50 px-5 py-4 text-sm text-indigo-800 ring-1 ring-indigo-100">
         <KeyRound className="h-5 w-5 shrink-0 text-indigo-600" aria-hidden="true" />
@@ -156,7 +143,7 @@ export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMesh
         <form className="space-y-5" onSubmit={createToken}>
           <label className="block"><span className="text-sm font-semibold text-slate-700">最大使用次数</span><input required min="1" max="100000" type="number" value={maxUses} onChange={(event) => setMaxUses(event.target.value)} className="mt-2 block w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200 focus:bg-white focus:ring-2 focus:ring-indigo-600" /><span className="mt-2 block text-xs text-slate-400">通常给单台设备使用时保持为 1。</span></label>
           <label className="block"><span className="text-sm font-semibold text-slate-700">有效期（小时）</span><input required min="1" max="8760" type="number" value={expiresInHours} onChange={(event) => setExpiresInHours(event.target.value)} className="mt-2 block w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200 focus:bg-white focus:ring-2 focus:ring-indigo-600" /></label>
-          <div className="flex justify-end gap-3"><Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>取消</Button><Button type="submit" loading={creating}><Plus className="h-4 w-4" aria-hidden="true" />创建</Button></div>
+          <div className="flex justify-end gap-3"><Button type="button" variant="secondary" onClick={() => setCreateOpen(false)}>取消</Button><Button type="submit"><Plus className="h-4 w-4" aria-hidden="true" />创建</Button></div>
         </form>
       </Modal>
 
@@ -165,7 +152,7 @@ export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMesh
       </Modal>
 
       <Modal open={confirmDisable !== null} onClose={() => setConfirmDisable(null)} title="禁用加入凭证？" description="之后不能再用它注册新设备。">
-        <div className="space-y-5"><div className="rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800 ring-1 ring-rose-200">已完成注册的设备不受影响；只有尚未使用的加入凭证会被阻止。</div><div className="flex justify-end gap-3"><Button variant="secondary" onClick={() => setConfirmDisable(null)}>取消</Button><Button variant="danger" loading={disablingId === confirmDisable?.id} onClick={() => void disableToken()}><Check className="h-4 w-4" aria-hidden="true" />确认禁用</Button></div></div>
+        <div className="space-y-5"><div className="rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800 ring-1 ring-rose-200">已完成注册的设备不受影响；只有尚未使用的加入凭证会被阻止。</div><div className="flex justify-end gap-3"><Button variant="secondary" onClick={() => setConfirmDisable(null)}>取消</Button><Button variant="danger" onClick={() => void disableToken()}><Check className="h-4 w-4" aria-hidden="true" />确认禁用</Button></div></div>
       </Modal>
     </>
   )

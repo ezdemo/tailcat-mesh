@@ -85,12 +85,15 @@ public final class VirtualLanDataPlaneSupervisor implements AutoCloseable {
                     stopLocked();
                     platformStateChanged = true;
                 }
-                if (tun2SocksHandle == null
+                boolean sidecarNeedsStart = tun2SocksHandle == null
                         || tun2SocksHandle.state() != com.tailcatmesh.agent.tailcat.model.ProcessState.RUNNING
-                        || !tun2SocksHandle.command().equals(desiredCommand)) {
-                    if (tun2SocksHandle != null) {
-                        tun2SocksSupervisor.stop(tun2SocksHandle);
+                        || !tun2SocksHandle.command().equals(desiredCommand);
+                if (sidecarNeedsStart) {
+                    if (tun2SocksHandle != null || tunHandle != null) {
+                        stopLocked(false);
+                        platformStateChanged = true;
                     }
+                    tunRuntime.prepare(desiredTun);
                     // The official tun2socks process owns creation of the TUN
                     // device. Java opens/configures that device below.
                     tun2SocksHandle = tun2SocksSupervisor.start(desiredSidecar);

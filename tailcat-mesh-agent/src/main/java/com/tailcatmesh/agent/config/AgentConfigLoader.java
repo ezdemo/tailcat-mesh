@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.tailcatmesh.agent.tailcat.TailcatBinaryLocator;
+import com.tailcatmesh.agent.tailcat.TailcatBinaryDownloader;
 
 import java.io.IOException;
 import java.net.URI;
@@ -40,8 +41,11 @@ public final class AgentConfigLoader {
         if (!supportedVersion.isBlank() && !"0.3.x".equalsIgnoreCase(supportedVersion.trim())) {
             throw new AgentConfigException("TM-AGENT-010", "only tailcat.supportedVersion=0.3.x is supported");
         }
+        String tailcatVersion = text(root, "tailcat.version", AgentConfig.DEFAULT_TAILCAT_VERSION);
+        boolean tailcatAutoDownload = bool(root, "tailcat.autoDownload", false);
         Path binary = overrides == null || overrides.tailcatBinary() == null
-                ? configuredBinary(root, baseDir) : resolve(baseDir, overrides.tailcatBinary());
+                ? configuredBinary(root, baseDir, tailcatAutoDownload, tailcatVersion)
+                : resolve(baseDir, overrides.tailcatBinary());
         Path serverKey = resolveKey(dataDir, text(root, "tailcat.serverKey", "tailcat-mesh-server"));
         Path clientKey = resolveKey(dataDir, text(root, "tailcat.clientKey", "tailcat-mesh-client"));
         boolean fullAddress = bool(root, "tailcat.fullAddress", true);
@@ -60,7 +64,9 @@ public final class AgentConfigLoader {
                 derpMapUrl,
                 Duration.ofSeconds(heartbeatSeconds),
                 Duration.ofSeconds(peerPingSeconds),
-                virtualLan
+                virtualLan,
+                tailcatAutoDownload,
+                tailcatVersion
         );
     }
 
@@ -100,9 +106,16 @@ public final class AgentConfigLoader {
         }
     }
 
-    private Path configuredBinary(JsonNode root, Path baseDir) {
+    private Path configuredBinary(JsonNode root, Path baseDir,
+                                  boolean autoDownload, String version) {
         String configured = text(root, "tailcat.binary", "");
-        return configured.isBlank() ? TailcatBinaryLocator.require() : resolve(baseDir, Path.of(configured));
+        if (!configured.isBlank()) {
+            return resolve(baseDir, Path.of(configured));
+        }
+        if (autoDownload) {
+            return TailcatBinaryDownloader.defaultBinaryPath(version);
+        }
+        return TailcatBinaryLocator.require();
     }
 
     private static Path resolveKey(Path dataDir, String value) {
@@ -114,6 +127,18 @@ public final class AgentConfigLoader {
     }
 
     private static Path resolve(Path baseDir, Path value) {
+        String text = value.toString();
+        if ("~".equals(text) || text.startsWith("~/") || text.startsWith("~\\")) {
+            String userHome = System.getProperty("user.home");
+            if (userHome == null || userHome.isBlank()) {
+                throw new AgentConfigException("TM-AGENT-010",
+                        "cannot expand ~ because user.home is empty");
+            }
+            if ("~".equals(text)) {
+                return Path.of(userHome).toAbsolutePath().normalize();
+            }
+            return Path.of(userHome).resolve(text.substring(2)).normalize();
+        }
         return value.isAbsolute() ? value : baseDir.resolve(value).normalize();
     }
 

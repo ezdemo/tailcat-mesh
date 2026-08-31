@@ -22,6 +22,7 @@ public final class AgentWebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(handler, "/api/v1/agent/ws")
-                .addInterceptors(interceptor);
+                .addInterceptors(interceptor)
+                .setAllowedOriginPatterns("*");
     }
 }

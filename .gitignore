@@ -25,3 +25,5 @@ tailcat-mesh-web/.env
 hs_err_pid*.log
 .DS_Store
 Thumbs.db
+/tailcat-mesh-web/pnpm-lock.yaml
+/tailcat-mesh-web/pnpm-workspace.yaml

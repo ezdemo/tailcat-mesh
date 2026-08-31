@@ -17,6 +17,18 @@ if (-not (Test-Path -LiteralPath $config -PathType Leaf)) {
     throw "Agent config not found: $config"
 }
 
+$commonScript = Join-Path $PSScriptRoot "agent-common.ps1"
+if (-not (Test-Path -LiteralPath $commonScript -PathType Leaf)) {
+    throw "Agent helper script not found: $commonScript"
+}
+. $commonScript
+Assert-WindowsAdministrator
+$java = Resolve-Java21
+Ensure-VirtualLanDependencies
+Remove-StaleVirtualLanState `
+    -InterfaceName "TailcatMeshAgent2" `
+    -AdapterGuid "8e3b9ec1-7f7a-5e37-ae7f-af1f5e3d7c82" `
+    -AgentConfigPath $config
 $javaArguments = @("-jar", $jar)
 if (Test-Path -LiteralPath $state -PathType Leaf) {
     $javaArguments += @("run", "--config", $config)
@@ -30,7 +42,7 @@ if (Test-Path -LiteralPath $state -PathType Leaf) {
 
 Push-Location $root
 try {
-    & java @javaArguments
+    & $java @javaArguments
     exit $LASTEXITCODE
 } finally {
     Pop-Location

@@ -2,7 +2,9 @@ server:
   url: http://localhost:8080
 
 tailcat:
-  binary: ./.local/tailcat/v0.3.0/tailcat.exe
+  # Missing binaries are downloaded to ~/.tailcat-mesh/tailcat/v0.3.0.
+  version: 0.3.0
+  autoDownload: true
   supportedVersion: 0.3.x
   serverKey: tailcat-mesh-server
   clientKey: tailcat-mesh-client
@@ -18,9 +20,10 @@ virtualLan:
   enabled: true
   interfaceName: TailcatMeshAgent1
   adapterGuid: 7d2a8db0-6f69-4d26-9d6e-9e0e4d2c6b71
-  wintunDll: ./.local/m7-e2e/wintun.dll
-  tun2socksBinary: ./.local/m7-e2e/tun2socks-windows-amd64-v3.exe
-  workingDirectory: ./.local/m7-e2e
+  # agent1.ps1 prepares these files in the shared per-user cache.
+  wintunDll: ~/.tailcat-mesh/virtual-lan/windows/wintun.dll
+  tun2socksBinary: ~/.tailcat-mesh/virtual-lan/windows/tun2socks.exe
+  workingDirectory: ~/.tailcat-mesh/virtual-lan/windows
   tun2socksArguments:
     - --device
     - tun://${tun}?guid={7d2a8db0-6f69-4d26-9d6e-9e0e4d2c6b71}

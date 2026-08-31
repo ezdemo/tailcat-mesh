@@ -5,6 +5,7 @@ import com.tailcatmesh.agent.config.VirtualLanAgentConfig;
 import com.tailcatmesh.agent.forward.PeerSocksEndpoint;
 import com.tailcatmesh.agent.socks.Socks5Client;
 import com.tailcatmesh.agent.tailcat.TailcatBinaryLocator;
+import com.tailcatmesh.agent.tailcat.TailcatBinaryDownloader;
 import com.tailcatmesh.agent.tailcat.TailcatCliEngine;
 import com.tailcatmesh.agent.tailcat.TailcatCliEngineConfig;
 import com.tailcatmesh.agent.tailcat.model.TailcatIdentity;
@@ -365,7 +366,11 @@ class TailcatVirtualLanE2eTest {
         if (configured != null && !configured.isBlank()) {
             return Path.of(configured).toAbsolutePath().normalize();
         }
-        return TailcatBinaryLocator.locate().orElse(null);
+        Path cached = Path.of(System.getProperty("user.home"), ".tailcat-mesh", "tailcat",
+                "v0.3.0", TailcatBinaryDownloader.defaultExecutableName())
+                .toAbsolutePath().normalize();
+        return TailcatBinaryLocator.locate().orElseGet(() ->
+                Files.isRegularFile(cached) ? cached : null);
     }
 
     private static Path configuredTun2SocksBinary() {
@@ -375,8 +380,11 @@ class TailcatVirtualLanE2eTest {
         }
         Path current = Path.of(System.getProperty("user.dir"));
         HostPlatform platform = HostPlatform.detect();
+        Path userCache = Path.of(System.getProperty("user.home"), ".tailcat-mesh",
+                "virtual-lan", "windows");
         List<Path> candidates = platform == HostPlatform.WINDOWS
                 ? List.of(
+                userCache.resolve("tun2socks.exe"),
                 current.resolve(".local/m7-e2e/tun2socks-windows-amd64-v3.exe"),
                 current.resolve("../.local/m7-e2e/tun2socks-windows-amd64-v3.exe"))
                 : List.of(
@@ -390,6 +398,11 @@ class TailcatVirtualLanE2eTest {
         String configured = System.getProperty("tailcat.wintun.dll");
         if (configured != null && !configured.isBlank()) {
             return Path.of(configured).toAbsolutePath().normalize();
+        }
+        Path cached = Path.of(System.getProperty("user.home"), ".tailcat-mesh",
+                "virtual-lan", "windows", "wintun.dll").toAbsolutePath().normalize();
+        if (Files.isRegularFile(cached)) {
+            return cached;
         }
         String programFiles = System.getenv("ProgramFiles");
         if (programFiles == null || programFiles.isBlank()) {

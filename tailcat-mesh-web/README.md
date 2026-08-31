@@ -24,7 +24,8 @@ npm run dev
 `http://localhost:8080`，因此登录页的“控制面地址”可以留空。
 
 如果前端和 Server 不在同一台机器，可以复制 `.env.example` 为 `.env`，设置
-`VITE_API_BASE_URL`，并在 Server 设置对应的 `WEB_ALLOWED_ORIGINS`：
+`VITE_API_BASE_URL`。Server 默认允许所有跨域来源；生产环境建议额外设置
+`WEB_ALLOWED_ORIGINS` 为前端的精确来源：
 
 ```text
 VITE_API_BASE_URL=https://mesh.example.com

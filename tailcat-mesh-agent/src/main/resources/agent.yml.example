@@ -2,7 +2,9 @@ server:
   url: https://mesh.example.com
 
 tailcat:
-  binary: ./bin/tailcat.exe
+  # Omit binary to use the per-user ~/.tailcat-mesh cache.
+  version: 0.3.0
+  autoDownload: true
   supportedVersion: 0.3.x
   serverKey: tailcat-mesh-server
   clientKey: tailcat-mesh-client
@@ -21,8 +23,8 @@ virtualLan:
   enabled: false
   interfaceName: TailcatMesh
   adapterGuid: 7d2a8db0-6f69-4d26-9d6e-9e0e4d2c6b71
-  wintunDll: ./bin/wintun.dll
-  tun2socksBinary: ./bin/tun2socks.exe
+  wintunDll: ~/.tailcat-mesh/virtual-lan/windows/wintun.dll
+  tun2socksBinary: ~/.tailcat-mesh/virtual-lan/windows/tun2socks.exe
   tun2socksArguments:
     - --device
     - ${tun}

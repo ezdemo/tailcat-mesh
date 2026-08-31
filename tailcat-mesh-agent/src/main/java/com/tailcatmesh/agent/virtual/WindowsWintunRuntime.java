@@ -44,6 +44,18 @@ public final class WindowsWintunRuntime implements TunRuntime {
     }
 
     @Override
+    public void prepare(TunConfig config) {
+        Objects.requireNonNull(config, "config");
+        if (platform != HostPlatform.WINDOWS) {
+            throw new TunRuntimeException("Wintun runtime requires a Windows host");
+        }
+        if (config.adapterGuid() == null) {
+            throw new TunRuntimeException("Wintun configuration requires a stable adapter GUID");
+        }
+        removeAdapter(config.adapterGuid(), true);
+    }
+
+    @Override
     public TunHandle open(TunConfig config) {
         Objects.requireNonNull(config, "config");
         if (platform != HostPlatform.WINDOWS) {
@@ -128,6 +140,7 @@ public final class WindowsWintunRuntime implements TunRuntime {
                     config.interfaceName(), address));
         }
         closeAdapter(adapter);
+        removeAdapter(config.adapterGuid(), false);
     }
 
     private void closeAdapter(WintunAdapterProvider.Adapter adapter) {
@@ -151,6 +164,32 @@ public final class WindowsWintunRuntime implements TunRuntime {
             executor.execute(command, null, Map.of(), commandTimeout);
         } catch (RuntimeException ignored) {
             // Address cleanup is best effort after an Agent crash or failure.
+        }
+    }
+
+    private void removeAdapter(java.util.UUID adapterGuid, boolean required) {
+        List<String> command = List.of(
+                "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                "$guid = [Environment]::GetEnvironmentVariable('TAILCAT_MESH_ADAPTER_GUID'); "
+                        + "$instanceId = 'SWD\\Wintun\\{' + $guid + '}'; "
+                        + "$device = Get-PnpDevice -Class Net "
+                        + "-ErrorAction SilentlyContinue | "
+                        + "Where-Object { $_.InstanceId -ieq $instanceId }; "
+                        + "if ($null -ne $device) { & pnputil.exe /remove-device "
+                        + "$device.InstanceId; exit $LASTEXITCODE }");
+        try {
+            OsCommandExecutor.CommandResult result = executor.execute(
+                    command, null, Map.of("TAILCAT_MESH_ADAPTER_GUID", adapterGuid.toString()), commandTimeout);
+            if (required && result.exitCode() != 0) {
+                throw new TunRuntimeException("remove stale Wintun adapter failed"
+                        + (result.stderr().isBlank() ? "" : ": " + result.stderr().trim()));
+            }
+        } catch (RuntimeException exception) {
+            if (required) {
+                throw exception;
+            }
+            // Adapter removal is best effort during shutdown. The launcher
+            // performs the same targeted cleanup before the next start.
         }
     }
 

@@ -50,6 +50,7 @@ public final class TailcatProcessSupervisor implements AutoCloseable {
     private static final Duration STABLE_RUNTIME = Duration.ofMinutes(5);
     private static final int MAX_CAPTURED_OUTPUT = 1_048_576;
     private static final int MAX_TAIL_LINES = 200;
+    private static final int MAX_DIAGNOSTIC_CHARS = 4_096;
     private static final Pattern CONN_BLOB = Pattern.compile("tc[A-Za-z0-9_-]{16,}");
 
     private final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -408,6 +409,21 @@ public final class TailcatProcessSupervisor implements AutoCloseable {
             return redactConnBlobs(stdoutTail.snapshot());
         }
 
+        /**
+         * Returns bounded, single-line, redacted process state for failure
+         * diagnostics. The command itself is deliberately omitted because it
+         * contains the peer ConnBlob.
+         */
+        public String diagnosticSummary() {
+            return "state=" + state
+                    + ", pid=" + pid()
+                    + ", alive=" + isAlive()
+                    + ", exitCode=" + exitCode
+                    + ", restartCount=" + restartCount
+                    + ", stderr=" + diagnosticOutput(stderrTail())
+                    + ", stdout=" + diagnosticOutput(stdoutTail());
+        }
+
         @Override
         public ProcessState state() {
             return state;
@@ -458,6 +474,18 @@ public final class TailcatProcessSupervisor implements AutoCloseable {
 
         private static String redactConnBlobs(String text) {
             return CONN_BLOB.matcher(text).replaceAll("<redacted-conn-blob>");
+        }
+
+        private static String diagnosticOutput(String output) {
+            if (output == null || output.isBlank()) {
+                return "<empty>";
+            }
+            String normalized = output.replace("\r", "\\r")
+                    .replace("\n", "\\n");
+            if (normalized.length() > MAX_DIAGNOSTIC_CHARS) {
+                return normalized.substring(0, MAX_DIAGNOSTIC_CHARS) + "...<truncated>";
+            }
+            return normalized;
         }
     }
 

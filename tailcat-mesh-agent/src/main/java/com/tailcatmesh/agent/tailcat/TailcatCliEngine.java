@@ -338,16 +338,13 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
                 virtualPeerProxies.put(key, handle);
                 return handle;
             } catch (TimeoutException exception) {
-                if (process != null) {
-                    process.stop(PROCESS_STOP_TIMEOUT);
-                }
-                throw new TailcatEngineException("TM-AGENT-005",
-                        "virtual peer SOCKS did not become ready", exception);
+                throw peerProxyFailure(
+                        "virtual peer SOCKS did not become ready", process, exception);
             } catch (TailcatEngineException exception) {
-                throw exception;
+                throw peerProxyFailure(exception, process);
             } catch (RuntimeException exception) {
-                throw new TailcatEngineException("TM-AGENT-005",
-                        "virtual peer SOCKS failed to start", exception);
+                throw peerProxyFailure(
+                        "virtual peer SOCKS failed to start", process, exception);
             }
         }
     }
@@ -419,16 +416,11 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
                 peerProxies.put(peerDeviceId, handle);
                 return handle;
             } catch (TimeoutException exception) {
-                if (process != null) {
-                    process.stop(PROCESS_STOP_TIMEOUT);
-                }
-                throw new TailcatEngineException("TM-AGENT-005",
-                        "Tailcat SOCKS did not become ready", exception);
+                throw peerProxyFailure("Tailcat SOCKS did not become ready", process, exception);
             } catch (TailcatEngineException exception) {
-                throw exception;
+                throw peerProxyFailure(exception, process);
             } catch (RuntimeException exception) {
-                throw new TailcatEngineException("TM-AGENT-005",
-                        "Tailcat SOCKS failed to start", exception);
+                throw peerProxyFailure("Tailcat SOCKS failed to start", process, exception);
             }
         }
     }
@@ -615,6 +607,44 @@ public final class TailcatCliEngine implements TailcatEngine, AutoCloseable {
                 throw exception;
             }
         }
+    }
+
+    /**
+     * Stops a failed SOCKS process and keeps the child diagnostics attached to
+     * the exception that reaches the Agent runtime. The command is omitted
+     * from the summary because its final argument is the peer ConnBlob.
+     */
+    private static TailcatEngineException peerProxyFailure(
+            String message, TailcatProcessSupervisor.ManagedProcessHandle process, Throwable cause) {
+        stopFailedPeerProxyProcess(process);
+        return new TailcatEngineException(
+                "TM-AGENT-005",
+                withProcessDiagnostics(message, process),
+                cause);
+    }
+
+    private static TailcatEngineException peerProxyFailure(
+            TailcatEngineException exception, TailcatProcessSupervisor.ManagedProcessHandle process) {
+        stopFailedPeerProxyProcess(process);
+        return new TailcatEngineException(
+                exception.code(),
+                withProcessDiagnostics(exception.getMessage(), process),
+                exception);
+    }
+
+    private static void stopFailedPeerProxyProcess(
+            TailcatProcessSupervisor.ManagedProcessHandle process) {
+        if (process != null) {
+            process.stop(PROCESS_STOP_TIMEOUT);
+        }
+    }
+
+    private static String withProcessDiagnostics(
+            String message, TailcatProcessSupervisor.ManagedProcessHandle process) {
+        String safeMessage = message == null || message.isBlank()
+                ? "Tailcat SOCKS operation failed" : message;
+        String diagnostics = process == null ? "process=not-started" : process.diagnosticSummary();
+        return safeMessage + "; " + diagnostics;
     }
 
     private void stopPeerProxyLocked(UUID peerDeviceId, TailcatPeerProxyHandle handle) {

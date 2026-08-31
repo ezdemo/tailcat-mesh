@@ -1,5 +1,6 @@
 package com.tailcatmesh.agent.config;
 
+import com.tailcatmesh.agent.tailcat.TailcatBinaryDownloader;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -9,6 +10,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,8 +49,30 @@ class AgentConfigLoaderTest {
         assertEquals(dataDir.resolve("identity/client.key"), config.clientKeyPath());
         assertEquals(20, config.heartbeatInterval().toSeconds());
         assertEquals(40, config.peerPingInterval().toSeconds());
+        assertFalse(config.tailcatAutoDownload());
+        assertEquals("0.3.0", config.tailcatVersion());
         assertEquals(URI.create("wss://mesh.example.test/base/api/v1/agent/ws"),
                 config.websocketEndpoint());
+    }
+
+    @Test
+    void autoDownloadUsesVersionedPlatformCacheWhenBinaryIsOmitted() throws Exception {
+        Path configPath = temporaryDirectory.resolve("auto-download.yml");
+        Files.writeString(configPath, """
+                server:
+                  url: http://127.0.0.1:8080
+                tailcat:
+                  version: v0.3.0
+                  autoDownload: true
+                """);
+
+        AgentConfig config = new AgentConfigLoader().load(configPath, null);
+
+        assertTrue(config.tailcatAutoDownload());
+        assertEquals("0.3.0", config.tailcatVersion());
+        assertEquals(
+                TailcatBinaryDownloader.defaultBinaryPath("0.3.0"),
+                config.tailcatBinary());
     }
 
     @Test
@@ -112,5 +136,36 @@ class AgentConfigLoaderTest {
                 config.virtualLan().tun2socksBinary());
         assertEquals(List.of("--device", "${tun}", "--proxy", "${proxy}"),
                 config.virtualLan().tun2socksArgumentTemplate());
+    }
+
+    @Test
+    void expandsUserHomeInVirtualLanPaths() throws Exception {
+        Path configPath = temporaryDirectory.resolve("virtual-lan-home.yml");
+        Files.writeString(configPath, """
+                server:
+                  url: http://127.0.0.1:8080
+                tailcat:
+                  binary: tailcat.exe
+                virtualLan:
+                  enabled: true
+                  wintunDll: ~/.tailcat-mesh/virtual-lan/windows/wintun.dll
+                  tun2socksBinary: ~/.tailcat-mesh/virtual-lan/windows/tun2socks.exe
+                  workingDirectory: ~/.tailcat-mesh/virtual-lan/windows
+                  tun2socksArguments:
+                    - --device
+                    - ${tun}
+                    - --proxy
+                    - ${proxy}
+                """);
+
+        AgentConfig config = new AgentConfigLoader().load(configPath, null);
+        Path home = Path.of(System.getProperty("user.home")).toAbsolutePath().normalize();
+
+        assertEquals(home.resolve(".tailcat-mesh/virtual-lan/windows/wintun.dll").normalize(),
+                config.virtualLan().wintunDll());
+        assertEquals(home.resolve(".tailcat-mesh/virtual-lan/windows/tun2socks.exe").normalize(),
+                config.virtualLan().tun2socksBinary());
+        assertEquals(home.resolve(".tailcat-mesh/virtual-lan/windows").normalize(),
+                config.virtualLan().workingDirectory());
     }
 }

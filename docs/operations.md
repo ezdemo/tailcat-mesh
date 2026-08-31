@@ -2,12 +2,37 @@
 
 ## Tailcat binary
 
-Install or package the official Tailcat v0.3.x binary separately. The Agent can
-use the `tailcat.binary` system property, the `TAILCAT_BINARY` environment
-variable, a repository `bin/` path, or an executable on `PATH`.
+Install or package the official Tailcat v0.3.x binary separately, or enable
+automatic download in the Agent configuration:
+
+```yaml
+tailcat:
+  version: 0.3.0
+  autoDownload: true
+```
+
+When `tailcat.binary` is omitted, the Agent selects the matching official
+`tailscale/tailcat` v0.3.0 release asset for the host platform and architecture,
+verifies its SHA-256, and extracts it atomically into the per-user cache
+`~/.tailcat-mesh/tailcat/v0.3.0/` (`%USERPROFILE%\.tailcat-mesh\...` on
+Windows). The current release supports Windows amd64/arm64 and Linux
+amd64/arm64/armv7; macOS is not included in the v0.3.0 release assets. An
+explicit `tailcat.binary` or `--tailcat-binary` overrides the cache location.
+Manual discovery remains available through the `tailcat.binary` system
+property, the `TAILCAT_BINARY` environment variable, a repository `bin/` path,
+or an executable on `PATH`.
 
 The binary is intentionally not committed to this repository. Pin the binary
 version and verify its release checksum before deployment.
+
+The repository's Windows `agent1.ps1` and `agent2.ps1` wrappers also prepare
+the Virtual LAN sidecars in `~/.tailcat-mesh/virtual-lan/windows/`: the
+version-pinned `tun2socks.exe` and the official `wintun.dll`. The files are
+downloaded only when missing, verified with SHA-256, and shared by both local
+Agents. Because Wintun creates a system adapter, run the wrappers from an
+elevated Administrator PowerShell or Git Bash terminal. Before starting, each
+wrapper also removes only its own fixed-GUID adapter and orphaned tun2socks
+process, recovering from an interrupted previous run.
 
 ## Control-plane Agent usage
 
@@ -79,9 +104,9 @@ credentials can be overridden with `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`.
 For PostgreSQL deployments, use the explicit settings in
 `deploy/docker-compose.yml`.
 
-For a separately hosted Web frontend, set `WEB_ALLOWED_ORIGINS` to its exact
-origin, for example `https://admin.example.com`. The default allows the local
-Vite origins `http://localhost:5173` and `http://127.0.0.1:5173`.
+The default allows all browser origins, methods, and request headers for the
+Web/API surface. For production, set `WEB_ALLOWED_ORIGINS` to the exact
+frontend origin, for example `https://admin.example.com`, to restrict it.
 
 ## Admin Web frontend
 

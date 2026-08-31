@@ -5,7 +5,8 @@ import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, formatRelativeDate, isTokenActive, shorten, statusLabels, statusStyles } from '../../lib/format'
 import type { Device, EnrollmentToken, Forward, Service } from '../../types'
 import type { ViewId } from '../../components/AppShell'
-import { Badge, Button, Card, Notice, PageHeader, Skeleton, Spinner, cn } from '../../components/ui'
+import { useMessage } from '../../components/message'
+import { Badge, Button, Card, PageHeader, Skeleton, Spinner, cn } from '../../components/ui'
 
 export function DashboardPage({
   api,
@@ -21,12 +22,10 @@ export function DashboardPage({
   const [services, setServices] = useState<Service[]>([])
   const [forwards, setForwards] = useState<Forward[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { showSuccess, showError } = useMessage()
 
-  async function load(showRefresh = false) {
-    setError(null)
-    showRefresh ? setRefreshing(true) : setLoading(true)
+  async function load(showRefresh = false, notify = false) {
+    if (!showRefresh) setLoading(true)
     try {
       const [nextDevices, nextTokens, nextServices, nextForwards] = await Promise.all([
         api.listDevices(),
@@ -38,12 +37,12 @@ export function DashboardPage({
       setTokens(nextTokens)
       setServices(nextServices)
       setForwards(nextForwards)
+      if (notify) showSuccess('总览已刷新。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '加载失败')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
@@ -70,10 +69,8 @@ export function DashboardPage({
         eyebrow="Workspace overview"
         title="控制面总览"
         description="查看设备健康状态、待处理审批和加入凭证。"
-        actions={<Button variant="secondary" loading={refreshing} onClick={() => void load(true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button>}
+        actions={<Button variant="secondary" onClick={() => void load(true, true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button>}
       />
-
-      {error && <div className="mb-6"><Notice tone="error" title="加载失败" message={error} onClose={() => setError(null)} /></div>}
 
       {loading ? (
         <DashboardLoading />

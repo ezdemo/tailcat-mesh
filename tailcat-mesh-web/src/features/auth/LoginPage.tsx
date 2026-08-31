@@ -2,7 +2,8 @@ import { useState, type FormEvent } from 'react'
 import { ArrowRight, Eye, EyeOff, Network, Server, ShieldCheck } from 'lucide-react'
 import { TailcatMeshApi, saveApiBaseUrl } from '../../api/client'
 import type { AuthSession } from '../../types'
-import { Button, Notice } from '../../components/ui'
+import { useMessage } from '../../components/message'
+import { Button } from '../../components/ui'
 
 export function LoginPage({
   initialApiBaseUrl,
@@ -15,22 +16,17 @@ export function LoginPage({
   const [password, setPassword] = useState('')
   const [apiBaseUrl, setApiBaseUrl] = useState(initialApiBaseUrl)
   const [showPassword, setShowPassword] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { showError } = useMessage()
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setError(null)
-    setLoading(true)
     try {
       const api = new TailcatMeshApi(apiBaseUrl)
       const session = await api.login(username.trim(), password)
       saveApiBaseUrl(apiBaseUrl)
       onLogin(session, apiBaseUrl.trim().replace(/\/$/, ''), username.trim())
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '登录失败，请稍后重试。')
-    } finally {
-      setLoading(false)
+      showError(reason instanceof Error ? reason.message : '请稍后重试。', '登录失败')
     }
   }
 
@@ -92,7 +88,6 @@ export function LoginPage({
             </div>
 
             <form className="mt-10 space-y-5" onSubmit={submit}>
-              {error && <Notice tone="error" message={error} />}
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">控制面地址</span>
                 <input
@@ -135,9 +130,9 @@ export function LoginPage({
                   </button>
                 </span>
               </label>
-              <Button type="submit" loading={loading} className="w-full py-3">
+              <Button type="submit" className="w-full py-3">
                 登录控制面
-                {!loading && <ArrowRight className="h-4 w-4" aria-hidden="true" />}
+                <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Button>
             </form>
 

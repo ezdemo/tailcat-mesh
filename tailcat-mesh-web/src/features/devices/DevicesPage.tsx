@@ -4,7 +4,8 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, formatRelativeDate, shorten, statusLabels, statusStyles } from '../../lib/format'
 import type { Device, DeviceStatus, DeviceVirtualNetwork } from '../../types'
-import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader, cn } from '../../components/ui'
+import { useMessage } from '../../components/message'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, PageHeader, cn } from '../../components/ui'
 
 const filters: Array<{ value: 'ALL' | DeviceStatus; label: string }> = [
   { value: 'ALL', label: '全部' },
@@ -19,27 +20,23 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
   const [selectedVirtualNetworks, setSelectedVirtualNetworks] = useState<DeviceVirtualNetwork[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [actionId, setActionId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'ALL' | DeviceStatus>('ALL')
-  const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<{ type: 'approve' | 'disable'; device: Device } | null>(null)
+  const { showSuccess, showError } = useMessage()
 
-  async function load(showRefresh = false) {
-    setError(null)
-    showRefresh ? setRefreshing(true) : setLoading(true)
+  async function load(showRefresh = false, notify = false) {
+    if (!showRefresh) setLoading(true)
     try {
       const nextDevices = await api.listDevices()
       setDevices(nextDevices)
       setSelectedDevice((current) => current ? nextDevices.find((device) => device.id === current.id) ?? current : null)
+      if (notify) showSuccess('设备数据已刷新。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '加载失败')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
@@ -69,7 +66,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
       setSelectedVirtualNetworks(virtualNetworks)
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '加载设备详情失败')
     }
   }
 
@@ -77,28 +74,24 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
     if (!confirm) return
     const { type, device } = confirm
     setConfirm(null)
-    setActionId(device.id)
-    setError(null)
     try {
       const updated = type === 'approve' ? await api.approveDevice(device.id) : await api.disableDevice(device.id)
       setDevices((current) => current.map((item) => item.id === updated.id ? updated : item))
       setSelectedDevice(updated)
       setSelectedVirtualNetworks(updated.virtualNetworks ?? [])
-      setNotice(type === 'approve' ? `${device.name} 已通过审批。` : `${device.name} 已禁用。`)
+      showSuccess(type === 'approve' ? `${device.name} 已通过审批。` : `${device.name} 已禁用。`)
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
-    } finally {
-      setActionId(null)
+      showError(errorMessage(reason), '操作失败')
     }
   }
 
   async function copyValue(value: string, label: string) {
     try {
       await navigator.clipboard.writeText(value)
-      setNotice(`${label}已复制。`)
+      showSuccess(`${label}已复制。`)
     } catch {
-      setError(`无法复制${label}，请手动选择文本。`)
+      showError(`无法复制${label}，请手动选择文本。`, '复制失败')
     }
   }
 
@@ -108,13 +101,8 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
         eyebrow="Device registry"
         title="设备"
         description="审批加入申请，查看 Agent 心跳和 Tailcat 运行状态。"
-        actions={<Button variant="secondary" loading={refreshing} onClick={() => void load(true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button>}
+        actions={<Button variant="secondary" onClick={() => void load(true, true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button>}
       />
-
-      <div className="space-y-4">
-        {error && <Notice tone="error" title="操作失败" message={error} onClose={() => setError(null)} />}
-        {notice && <Notice tone="success" message={notice} onClose={() => setNotice(null)} />}
-      </div>
 
       <Card className="mt-6 overflow-hidden">
         <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
@@ -192,8 +180,8 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
             <div className="flex flex-wrap items-center justify-between gap-3">
               <Badge className={statusStyles[selectedDevice.status]}>{statusLabels[selectedDevice.status]}</Badge>
               <div className="flex gap-2">
-                {selectedDevice.status === 'PENDING' && <Button loading={actionId === selectedDevice.id} onClick={() => setConfirm({ type: 'approve', device: selectedDevice })}><ShieldCheck className="h-4 w-4" aria-hidden="true" />批准设备</Button>}
-                {selectedDevice.status !== 'DISABLED' && <Button variant="danger" loading={actionId === selectedDevice.id} onClick={() => setConfirm({ type: 'disable', device: selectedDevice })}><XCircle className="h-4 w-4" aria-hidden="true" />禁用设备</Button>}
+                {selectedDevice.status === 'PENDING' && <Button onClick={() => setConfirm({ type: 'approve', device: selectedDevice })}><ShieldCheck className="h-4 w-4" aria-hidden="true" />批准设备</Button>}
+                {selectedDevice.status !== 'DISABLED' && <Button variant="danger" onClick={() => setConfirm({ type: 'disable', device: selectedDevice })}><XCircle className="h-4 w-4" aria-hidden="true" />禁用设备</Button>}
               </div>
             </div>
 

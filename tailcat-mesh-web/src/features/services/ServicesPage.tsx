@@ -4,7 +4,8 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, shorten } from '../../lib/format'
 import type { Device, Service, ServiceRequest, ServiceStatus } from '../../types'
-import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader } from '../../components/ui'
+import { useMessage } from '../../components/message'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, PageHeader } from '../../components/ui'
 
 const serviceStatusLabels: Record<ServiceStatus, string> = {
   STARTING: '启动中',
@@ -40,31 +41,26 @@ export function ServicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
   const [services, setServices] = useState<Service[]>([])
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<Service | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Service | null>(null)
   const [form, setForm] = useState<ServiceFormState>(emptyForm)
-  const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null)
+  const { showSuccess, showError } = useMessage()
 
-  async function load(showRefresh = false) {
-    setError(null)
-    showRefresh ? setRefreshing(true) : setLoading(true)
+  async function load(showRefresh = false, notify = false) {
+    if (!showRefresh) setLoading(true)
     try {
       const [nextServices, nextDevices] = await Promise.all([api.listServices(), api.listDevices()])
       setServices(nextServices)
       setDevices(nextDevices)
       setLastLoadedAt(new Date().toISOString())
+      if (notify) showSuccess('服务数据已刷新。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
+      showError(errorMessage(reason), '加载失败')
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }
 
@@ -79,7 +75,6 @@ export function ServicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
   function openCreate() {
     setEditing(null)
     setForm({ ...emptyForm, deviceId: usableDevices[0]?.id ?? '' })
-    setError(null)
     setFormOpen(true)
   }
 
@@ -92,14 +87,11 @@ export function ServicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
       targetPort: String(service.targetPort),
       enabled: service.enabled,
     })
-    setError(null)
     setFormOpen(true)
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSaving(true)
-    setError(null)
     const request: ServiceRequest = {
       deviceId: form.deviceId,
       name: form.name.trim(),
@@ -116,29 +108,23 @@ export function ServicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
         ? current.map((service) => service.id === saved.id ? saved : service)
         : [saved, ...current])
       setFormOpen(false)
-      setNotice(editing ? '服务配置已更新，Agent 将在同步后重建桥接。' : '服务已创建，Agent 将在同步后启动桥接。')
+      showSuccess(editing ? '服务配置已更新，Agent 将在同步后重建桥接。' : '服务已创建，Agent 将在同步后启动桥接。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
-    } finally {
-      setSaving(false)
+      showError(errorMessage(reason), '保存失败')
     }
   }
 
   async function remove() {
     if (!deleteTarget) return
-    setDeletingId(deleteTarget.id)
-    setError(null)
     try {
       await api.deleteService(deleteTarget.id)
       setServices((current) => current.filter((service) => service.id !== deleteTarget.id))
       setDeleteTarget(null)
-      setNotice('服务已删除。')
+      showSuccess('服务已删除。')
     } catch (reason) {
       if (isUnauthorized(reason)) onUnauthorized()
-      setError(errorMessage(reason))
-    } finally {
-      setDeletingId(null)
+      showError(errorMessage(reason), '删除失败')
     }
   }
 
@@ -148,13 +134,8 @@ export function ServicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
         eyebrow="Published services"
         title="服务"
         description="把设备所在网络里的 TCP 服务发布到 Mesh。Agent 会在本机创建 loopback bridge，并由 Tailcat 对外提供访问。"
-        actions={<><Button variant="secondary" loading={refreshing} onClick={() => void load(true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button><Button onClick={openCreate} disabled={usableDevices.length === 0}><Plus className="h-4 w-4" aria-hidden="true" />发布服务</Button></>}
+        actions={<><Button variant="secondary" onClick={() => void load(true, true)}><RefreshCw className="h-4 w-4" aria-hidden="true" />刷新</Button><Button onClick={openCreate} disabled={usableDevices.length === 0}><Plus className="h-4 w-4" aria-hidden="true" />发布服务</Button></>}
       />
-
-      <div className="space-y-4">
-        {error && <Notice tone="error" title="操作失败" message={error} onClose={() => setError(null)} />}
-        {notice && <Notice tone="success" message={notice} onClose={() => setNotice(null)} />}
-      </div>
 
       <div className="mt-6 flex items-center gap-3 rounded-2xl bg-indigo-50 px-5 py-4 text-sm text-indigo-800 ring-1 ring-indigo-100">
         <Server className="h-5 w-5 shrink-0 text-indigo-600" aria-hidden="true" />
@@ -210,12 +191,12 @@ export function ServicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
             <label className="block"><span className="text-sm font-semibold text-slate-700">目标端口</span><input required min="1" max="65535" type="number" value={form.targetPort} onChange={(event) => setForm({ ...form, targetPort: event.target.value })} className="mt-2 block w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200 focus:bg-white focus:ring-2 focus:ring-indigo-600" /></label>
           </div>
           <label className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700 ring-1 ring-slate-100"><input type="checkbox" checked={form.enabled} onChange={(event) => setForm({ ...form, enabled: event.target.checked })} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600" /><span><span className="font-semibold">启用服务</span><span className="mt-0.5 block text-xs text-slate-400">关闭后 Agent 会停止 bridge，但保留配置。</span></span></label>
-          <div className="flex justify-end gap-3"><Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>取消</Button><Button type="submit" loading={saving} disabled={!form.deviceId}><Check className="h-4 w-4" aria-hidden="true" />{editing ? '保存修改' : '发布服务'}</Button></div>
+          <div className="flex justify-end gap-3"><Button type="button" variant="secondary" onClick={() => setFormOpen(false)}>取消</Button><Button type="submit" disabled={!form.deviceId}><Check className="h-4 w-4" aria-hidden="true" />{editing ? '保存修改' : '发布服务'}</Button></div>
         </form>
       </Modal>
 
       <Modal open={deleteTarget !== null} onClose={() => setDeleteTarget(null)} title="删除这个服务？" description={deleteTarget?.name}>
-        <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800 ring-1 ring-rose-200"><XCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" /><p>删除后，Agent 会停止对应 bridge，远端将不能再通过这个服务访问目标地址。此操作不可撤销。</p></div><div className="flex justify-end gap-3"><Button variant="secondary" onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" loading={deletingId === deleteTarget?.id} onClick={() => void remove()}><Trash2 className="h-4 w-4" aria-hidden="true" />确认删除</Button></div></div>
+        <div className="space-y-5"><div className="flex items-start gap-3 rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-800 ring-1 ring-rose-200"><XCircle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" /><p>删除后，Agent 会停止对应 bridge，远端将不能再通过这个服务访问目标地址。此操作不可撤销。</p></div><div className="flex justify-end gap-3"><Button variant="secondary" onClick={() => setDeleteTarget(null)}>取消</Button><Button variant="danger" onClick={() => void remove()}><Trash2 className="h-4 w-4" aria-hidden="true" />确认删除</Button></div></div>
       </Modal>
 
       {services.length > 0 && lastLoadedAt && <p className="mt-4 text-xs text-slate-400">最后一次列表刷新：{formatDate(lastLoadedAt)}。运行态来自 Agent 上报，配置变更可能有约 2 秒同步延迟。</p>}
