@@ -17,6 +17,9 @@ import com.tailcatmesh.agent.service.ServiceBridge;
 import com.tailcatmesh.agent.service.ServiceBridgeHandle;
 import com.tailcatmesh.agent.service.ServiceRuntimeConfig;
 import com.tailcatmesh.agent.service.TcpServiceBridge;
+import com.tailcatmesh.agent.status.AgentLocalStatusServer;
+import com.tailcatmesh.agent.status.LocalAgentStatus;
+import com.tailcatmesh.agent.status.LocalNetworkStatus;
 import com.tailcatmesh.agent.tailcat.TailcatCliEngine;
 import com.tailcatmesh.agent.tailcat.TailcatEngine;
 import com.tailcatmesh.agent.tailcat.model.ProcessState;
@@ -122,6 +125,7 @@ public final class AgentRuntime implements AutoCloseable {
     private volatile AgentDesiredState desiredState;
     private volatile AgentDesiredState pendingDesiredStateFallback;
     private volatile ScheduledFuture<?> desiredStateTask;
+    private volatile AgentLocalStatusServer localStatusServer;
     private volatile TailcatServerConfig serverConfig;
     private volatile boolean runtimeServerReported;
     private volatile boolean serviceRuntimeReported;
@@ -190,6 +194,9 @@ public final class AgentRuntime implements AutoCloseable {
                     config.heartbeatInterval().toSeconds(), config.heartbeatInterval().toSeconds(), TimeUnit.SECONDS);
             peerPingTask = peerPingExecutor.scheduleAtFixedRate(this::peerPingSafely,
                     0, config.peerPingInterval().toSeconds(), TimeUnit.SECONDS);
+            localStatusServer = new AgentLocalStatusServer(
+                    config.dataDir(), this::localStatus, this::reconnect, this::close);
+            localStatusServer.start();
 
             String status = currentServerStatus();
             output.println("Tailcat Mesh Agent connected; device=" + state.deviceId() + ", status=" + status);
@@ -262,6 +269,11 @@ public final class AgentRuntime implements AutoCloseable {
         }
         heartbeatExecutor.shutdownNow();
         peerPingExecutor.shutdownNow();
+        AgentLocalStatusServer local = localStatusServer;
+        localStatusServer = null;
+        if (local != null) {
+            local.close();
+        }
         WebSocket socket = webSocket;
         if (socket != null) {
             try {
@@ -351,7 +363,8 @@ public final class AgentRuntime implements AutoCloseable {
                 System.getProperty("os.arch", "unknown"),
                 agentVersion,
                 tailcatEngine.getVersion().toString(),
-                localIdentity.clientPublicKey()
+                localIdentity.clientPublicKey(),
+                config.deviceName()
         );
         if (enrolled == null || enrolled.deviceId() == null
                 || enrolled.agentCredential() == null || enrolled.agentCredential().isBlank()) {
@@ -362,6 +375,60 @@ public final class AgentRuntime implements AutoCloseable {
                 ? "PENDING" : enrolled.status();
         stateStore.save(result);
         return result;
+    }
+
+    /** Refreshes desired state through the authenticated control channel. */
+    public void reconnect() {
+        if (closed.get() || state == null) {
+            throw new IllegalStateException("Agent is not running");
+        }
+        reconcileDesiredState(controlClient.desiredState(state.agentCredential()), false);
+        sendHeartbeat();
+    }
+
+    /** Returns the non-secret projection used by the loopback Desktop API. */
+    public LocalAgentStatus localStatus() {
+        TailcatRuntimeStatus runtimeStatus;
+        try {
+            runtimeStatus = tailcatEngine.getRuntimeStatus();
+        } catch (RuntimeException exception) {
+            runtimeStatus = new TailcatRuntimeStatus(ProcessState.FAILED, null, null,
+                    safeError(exception), 0);
+        }
+        boolean tailcatRunning = runtimeStatus.state() == ProcessState.RUNNING;
+        String controlStatus = controlPlaneStatus == null ? "UNKNOWN" : controlPlaneStatus;
+        String status = tailcatRunning
+                ? ("ONLINE".equalsIgnoreCase(controlStatus) ? "CONNECTED" : "PENDING")
+                : "DEGRADED";
+
+        Map<UUID, AgentVirtualNetworkRuntime> runtimeByNetwork = new HashMap<>();
+        for (AgentVirtualNetworkRuntime runtime : virtualNetworkManager.snapshot()) {
+            runtimeByNetwork.put(runtime.networkId(), runtime);
+        }
+        List<LocalNetworkStatus> networks = desiredState == null ? List.of()
+                : desiredState.virtualNetworks().stream()
+                .map(network -> {
+                    AgentVirtualNetworkRuntime runtime = runtimeByNetwork.get(network.networkId());
+                    String networkStatus = runtime == null ? "PENDING" : runtime.status();
+                    String error = runtime == null ? null : runtime.lastError();
+                    return new LocalNetworkStatus(network.networkId(), network.name(), network.cidr(),
+                            network.virtualIpv4(), networkStatus, null, error);
+                })
+                .toList();
+        String lastError = tailcatRunning ? null : safeError(runtimeStatus.stderrTail());
+        return new LocalAgentStatus(
+                status,
+                controlStatus,
+                state == null ? null : state.deviceId(),
+                configuredDeviceName(),
+                config.serverUrl().toString(),
+                "RUNNING",
+                ProcessHandle.current().pid(),
+                safeTailcatVersion(),
+                runtimeStatus.state().name(),
+                networks,
+                lastError,
+                Instant.now());
     }
 
     private void sendHeartbeat() {
@@ -1230,6 +1297,19 @@ public final class AgentRuntime implements AutoCloseable {
         }
     }
 
+    private String configuredDeviceName() {
+        return config.deviceName() == null || config.deviceName().isBlank()
+                ? localHostname() : config.deviceName();
+    }
+
+    private String safeTailcatVersion() {
+        try {
+            return tailcatEngine.getVersion().toString();
+        } catch (RuntimeException exception) {
+            return "unknown";
+        }
+    }
+
     private static String normalizedOs() {
         return System.getProperty("os.name", "unknown").toLowerCase(java.util.Locale.ROOT);
     }
@@ -1254,6 +1334,14 @@ public final class AgentRuntime implements AutoCloseable {
             message = exception == null ? "Local Forward failed" : exception.getClass().getSimpleName();
         }
         message = message.replace("\r", "\\r").replace("\n", "\\n");
+        return message.length() <= 2_000 ? message : message.substring(0, 2_000);
+    }
+
+    private static String safeError(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String message = value.replace("\r", "\\r").replace("\n", "\\n").trim();
         return message.length() <= 2_000 ? message : message.substring(0, 2_000);
     }
 

@@ -10,7 +10,7 @@ Tailcat Mesh is not affiliated with, sponsored by, or endorsed by Tailscale Inc.
 
 ### Current status
 
-The current implementation covers the specification milestones M0–M6 and M7.1–M7.10 for a TCP-first Virtual LAN:
+The current implementation covers the specification milestones M0–M6, M7.1–M7.10, and M8 Desktop:
 
 - Maven multi-module project with a shared protocol, Java Server, and Java Agent.
 - Java 21 `TailcatEngine` / `TailcatCliEngine` boundaries; business code does not invoke `ProcessBuilder` directly.
@@ -22,8 +22,9 @@ The current implementation covers the specification milestones M0–M6 and M7.1�
 - Virtual Network / Member models, CIDR overlap validation, stable virtual IPv4 allocation, per-device network runtimes, Java TCP-first SOCKS routing, Windows Wintun, Linux TUN, Mesh CIDR routes, and tun2socks supervision.
 - Explicit allowlists, `--allow=none` for empty access, network/device-specific Server keys, revocation paths, and privileged Windows/Linux E2E coverage.
 - Executable fat JAR packaging for the Agent. The Agent persists its control-plane credential locally after first enrollment.
+- M8 Desktop thin shell in `tailcat-mesh-desktop/`: a Windows Electron first-connection wizard, tray, login startup, direct native Java Agent supervisor, and loopback-only status channel. Electron does not implement a second Tailcat/tun2socks/Wintun runtime.
 
-Windows Service installation and automatic startup are planned for the later M8 packaging milestone. The current Agent runs in the foreground and provides one-command enrollment plus local TCP access.
+The Java Agent runs as the supervised foreground child of Electron's main process. The Desktop app provides the Windows tray, login startup, one-click enrollment, and automatic Agent recovery.
 
 ### Quick start: connect a device
 
@@ -228,7 +229,7 @@ Tailcat Mesh 是一个基于官方 Tailcat 数据面的开源、自托管 TCP �
 
 ## 当前可用范围
 
-当前代码完成了规格说明书中的 M0/M1/M2/M3/M4/M5/M6，并完成 M7.1–M7.10 TCP-first Virtual LAN 闭环：
+当前代码完成了规格说明书中的 M0/M1/M2/M3/M4/M5/M6、M7.1–M7.10 TCP-first Virtual LAN 闭环，以及 M8 Desktop：
 
 - Maven 多模块骨架：共享协议、Java Server、Java Agent。
 - Java 21 `TailcatEngine` / `TailcatCliEngine` 边界；业务代码不直接调用 `ProcessBuilder`。
@@ -242,8 +243,9 @@ Tailcat Mesh 是一个基于官方 Tailcat 数据面的开源、自托管 TCP �
 - M7.1 已提供 Virtual Network / Member 数据模型、Flyway 迁移、CIDR 重叠校验、稳定 Virtual IPv4 IPAM，以及 Web 的“网络”页面；M7.2 已接入每个 Device×MeshNetwork 独立 key/runtime、`--serve=all`、同网络 allowlist 与 ConnBlob 上报；M7.3/M7.4 已接入 Java TCP-first SOCKS 路由和 Network×Peer 组装；M7.5 已加入 Windows Wintun、Linux TUN、Mesh CIDR route、tun2socks Supervisor 的独立 Adapter/组合边界。
 - M7.6–M7.9 已把 Virtual Network 成员/设备投影、TCP-only 边界、Agent supervisor/reconnect、显式 allowlist、`--allow=none`、Network/Device 专属 server key 和撤销路径接入运行时；不使用 `--serve=exit-node`，不添加默认路由。M7.10 提供 Windows/Linux 特权 E2E 验收：虚拟 IP 稳定性、跨 Network 隔离、TCP 访问、Direct/DERP 路径、Agent 重启和成员移除撤销。
 - Agent 可打包为可执行 fat JAR，首次注册后把 Agent credential 保存到本地，重启时复用。
+- M8 已加入 `tailcat-mesh-desktop/` Windows Electron 薄壳：首次注册向导、托盘、登录自启动、Electron 原生 Java Agent 进程监督、loopback 状态接口和 NSIS 安装包；Java Agent 仍是 Mesh、Tailcat、Virtual LAN 运行时的唯一真相源。
 
-Windows Service 安装与自动启动属于后续 M8 Packaging；当前 Agent 以前台进程方式运行，已经可以提供用户侧的一行命令连接和本地 TCP 端口访问。
+M8 Desktop 已提供 Windows Electron 薄壳、托盘、登录自启动、一次性注册向导、Electron 原生 Java Agent 监督、状态接口和 NSIS 安装包；Mesh Identity、Agent 运行时和 Native dependency lifecycle 仍由 Java 负责。
 
 ## 用户端：一行命令连接
 

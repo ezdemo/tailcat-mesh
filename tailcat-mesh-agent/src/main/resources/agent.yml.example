@@ -1,6 +1,10 @@
 server:
   url: https://mesh.example.com
 
+device:
+  # Optional; defaults to the local hostname.
+  name: DESKTOP-ABC
+
 tailcat:
   # Omit binary to use the per-user ~/.tailcat-mesh cache.
   version: 0.3.0

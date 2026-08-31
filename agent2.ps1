@@ -22,13 +22,16 @@ if (-not (Test-Path -LiteralPath $commonScript -PathType Leaf)) {
     throw "Agent helper script not found: $commonScript"
 }
 . $commonScript
-Assert-WindowsAdministrator
+$virtualLan = Get-AgentVirtualLanSettings -ConfigPath $config
+if ($virtualLan.Enabled) {
+    Assert-WindowsAdministrator
+    Ensure-VirtualLanDependencies
+    Remove-StaleVirtualLanState `
+        -InterfaceName $virtualLan.InterfaceName `
+        -AdapterGuid $virtualLan.AdapterGuid `
+        -AgentConfigPath $config
+}
 $java = Resolve-Java21
-Ensure-VirtualLanDependencies
-Remove-StaleVirtualLanState `
-    -InterfaceName "TailcatMeshAgent2" `
-    -AdapterGuid "8e3b9ec1-7f7a-5e37-ae7f-af1f5e3d7c82" `
-    -AgentConfigPath $config
 $javaArguments = @("-jar", $jar)
 if (Test-Path -LiteralPath $state -PathType Leaf) {
     $javaArguments += @("run", "--config", $config)

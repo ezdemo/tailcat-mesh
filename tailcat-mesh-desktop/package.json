@@ -1,0 +1,26 @@
+{
+  "name": "tailcat-mesh-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin Windows Electron shell for the Tailcat Mesh Java Agent",
+  "main": "dist/main/main.js",
+  "author": "Tailcat Mesh contributors",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && node scripts/copy-renderer.mjs",
+    "prepare-agent": "node scripts/stage-agent.mjs",
+    "dev": "npm run build && electron .",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "dist": "npm run build && npm run prepare-agent && electron-builder --config electron-builder.yml"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.2"
+  }
+}

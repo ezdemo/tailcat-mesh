@@ -43,8 +43,15 @@ public final class AgentControlClient {
 
     public AgentEnrollmentResponse enroll(String enrollmentToken, String hostname, String os, String arch,
                                           String agentVersion, String tailcatVersion, String clientPublicKey) {
+        return enroll(enrollmentToken, hostname, os, arch, agentVersion, tailcatVersion,
+                clientPublicKey, null);
+    }
+
+    public AgentEnrollmentResponse enroll(String enrollmentToken, String hostname, String os, String arch,
+                                          String agentVersion, String tailcatVersion, String clientPublicKey,
+                                          String deviceName) {
         return sendJson("POST", "/api/v1/agent/enroll", new AgentEnrollmentRequest(
-                enrollmentToken, hostname, os, arch, agentVersion, tailcatVersion, clientPublicKey), null,
+                enrollmentToken, hostname, os, arch, agentVersion, tailcatVersion, clientPublicKey, deviceName), null,
                 AgentEnrollmentResponse.class);
     }
 

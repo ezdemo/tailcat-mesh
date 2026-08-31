@@ -53,6 +53,7 @@ public final class AgentConfigLoader {
         int heartbeatSeconds = boundedSeconds(root, "agent.heartbeatSeconds", DEFAULT_HEARTBEAT_SECONDS);
         int peerPingSeconds = boundedSeconds(root, "agent.peerPingSeconds", DEFAULT_PEER_PING_SECONDS);
         VirtualLanAgentConfig virtualLan = virtualLan(root, baseDir);
+        String deviceName = text(root, "device.name", "");
 
         return new AgentConfig(
                 serverUrl,
@@ -66,7 +67,8 @@ public final class AgentConfigLoader {
                 Duration.ofSeconds(peerPingSeconds),
                 virtualLan,
                 tailcatAutoDownload,
-                tailcatVersion
+                tailcatVersion,
+                deviceName
         );
     }
 

@@ -113,10 +113,12 @@ public class EnrollmentService {
                     "enrollment token is invalid or expired");
         }
         UUID deviceId = UUID.randomUUID();
+        String deviceName = request.deviceName() == null || request.deviceName().isBlank()
+                ? request.hostname() : request.deviceName().trim();
         DeviceRecord device = new DeviceRecord(
                 deviceId,
                 token.networkId(),
-                request.hostname(),
+                deviceName,
                 request.hostname(),
                 request.os(),
                 request.arch(),
@@ -157,6 +159,9 @@ public class EnrollmentService {
         requireText(request.arch(), "arch", 64);
         requireText(request.agentVersion(), "agentVersion", 64);
         requireText(request.tailcatVersion(), "tailcatVersion", 64);
+        if (request.deviceName() != null && !request.deviceName().isBlank()) {
+            requireText(request.deviceName(), "deviceName", 255);
+        }
         if (request.clientPublicKey() == null || !PUBLIC_KEY.matcher(request.clientPublicKey()).matches()) {
             throw new ControlPlaneException("TM-CTRL-002", HttpStatus.BAD_REQUEST,
                     "clientPublicKey is invalid");

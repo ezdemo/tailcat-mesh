@@ -1,0 +1,28 @@
+appId: com.tailcatmesh.desktop
+productName: Tailcat Mesh
+asar: true
+compression: maximum
+directories:
+  output: release
+files:
+  - dist/**/*
+extraResources:
+  - from: resources/agent
+    to: agent
+  - from: resources/tray.svg
+    to: tray.svg
+win:
+  # Java owns Wintun installation and route changes. Elevate the packaged
+  # desktop once so Electron's native Java child inherits the same token.
+  requestedExecutionLevel: requireAdministrator
+  target:
+    - nsis
+  artifactName: Tailcat-Mesh-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true

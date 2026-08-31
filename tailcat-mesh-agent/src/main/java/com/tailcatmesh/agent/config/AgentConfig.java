@@ -18,7 +18,8 @@ public record AgentConfig(
         Duration peerPingInterval,
         VirtualLanAgentConfig virtualLan,
         boolean tailcatAutoDownload,
-        String tailcatVersion
+        String tailcatVersion,
+        String deviceName
 ) {
     public static final String DEFAULT_TAILCAT_VERSION = "0.3.0";
 
@@ -28,7 +29,7 @@ public record AgentConfig(
                        Duration peerPingInterval) {
         this(serverUrl, tailcatBinary, dataDir, serverKeyPath, clientKeyPath, fullAddress,
                 derpMapUrl, heartbeatInterval, peerPingInterval,
-                VirtualLanAgentConfig.disabled(), false, DEFAULT_TAILCAT_VERSION);
+                VirtualLanAgentConfig.disabled(), false, DEFAULT_TAILCAT_VERSION, null);
     }
 
     /** Backwards-compatible constructor for callers that provide Virtual LAN settings. */
@@ -38,7 +39,7 @@ public record AgentConfig(
                        Duration peerPingInterval, VirtualLanAgentConfig virtualLan) {
         this(serverUrl, tailcatBinary, dataDir, serverKeyPath, clientKeyPath, fullAddress,
                 derpMapUrl, heartbeatInterval, peerPingInterval, virtualLan,
-                false, DEFAULT_TAILCAT_VERSION);
+                false, DEFAULT_TAILCAT_VERSION, null);
     }
 
     public AgentConfig {
@@ -55,6 +56,7 @@ public record AgentConfig(
         peerPingInterval = positive(peerPingInterval, "peerPingInterval");
         virtualLan = virtualLan == null ? VirtualLanAgentConfig.disabled() : virtualLan;
         tailcatVersion = normalizeTailcatVersion(tailcatVersion);
+        deviceName = normalizeDeviceName(deviceName);
     }
 
     public URI endpoint(String path) {
@@ -108,6 +110,18 @@ public record AgentConfig(
         if (!normalized.matches("\\d+\\.\\d+\\.\\d+")) {
             throw new AgentConfigException("TM-AGENT-010",
                     "tailcat.version must be a semantic version such as 0.3.0");
+        }
+        return normalized;
+    }
+
+    private static String normalizeDeviceName(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.length() > 255 || normalized.indexOf('\r') >= 0 || normalized.indexOf('\n') >= 0) {
+            throw new AgentConfigException("TM-AGENT-010",
+                    "device.name must be at most 255 characters and must not contain newlines");
         }
         return normalized;
     }
