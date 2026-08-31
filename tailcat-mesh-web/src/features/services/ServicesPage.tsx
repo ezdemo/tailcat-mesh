@@ -4,7 +4,7 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, shorten } from '../../lib/format'
 import type { Device, Service, ServiceRequest, ServiceStatus } from '../../types'
-import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, Spinner } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader } from '../../components/ui'
 
 const serviceStatusLabels: Record<ServiceStatus, string> = {
   STARTING: '启动中',
@@ -163,12 +163,12 @@ export function ServicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
 
       <Card className="mt-6 overflow-hidden">
         {loading ? (
-          <div className="flex min-h-80 items-center justify-center"><Spinner /></div>
+          <LoadingState />
         ) : services.length === 0 ? (
           <EmptyState icon={Server} title="还没有发布服务" description="选择一台已注册设备，填写它能访问的 TCP 目标地址。" action={<Button onClick={openCreate} disabled={usableDevices.length === 0}><Plus className="h-4 w-4" aria-hidden="true" />发布第一个服务</Button>} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100">
+            <table className="min-w-full table-fixed divide-y divide-slate-100">
               <thead className="bg-slate-50/70">
                 <tr>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:px-6">名称</th>

@@ -34,7 +34,9 @@ export function Button({
       disabled={disabled || loading}
       {...props}
     >
-      {loading && <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />}
+      <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">
+        <LoaderCircle className={cn('h-4 w-4', loading ? 'animate-spin' : 'invisible')} />
+      </span>
       {children}
     </button>
   )
@@ -115,7 +117,7 @@ export function EmptyState({ icon: Icon, title, description, action }: {
   action?: ReactNode
 }) {
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+    <div className="flex min-h-[24rem] flex-col items-center justify-center px-6 py-16 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
         <Icon className="h-6 w-6" aria-hidden="true" />
       </div>
@@ -164,4 +166,34 @@ export function Modal({
 
 export function Spinner({ className }: { className?: string }) {
   return <LoaderCircle className={cn('h-5 w-5 animate-spin text-ink', className)} aria-label="加载中" />
+}
+
+export function Skeleton({ className }: { className?: string }) {
+  return <span className={cn('block animate-pulse rounded-sm bg-slate-100', className)} aria-hidden="true" />
+}
+
+export function LoadingState({ rows = 5, className }: { rows?: number; className?: string }) {
+  return (
+    <div className={cn('min-h-[24rem] p-5 sm:p-6', className)} role="status" aria-label="加载中">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+        <div className="space-y-2">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-2 w-40" />
+        </div>
+        <Spinner className="h-4 w-4" />
+      </div>
+      <div className="divide-y divide-slate-100">
+        {Array.from({ length: rows }, (_, index) => (
+          <div key={index} className="flex min-h-14 items-center gap-4 py-3">
+            <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-3 w-1/3 min-w-24" />
+              <Skeleton className="h-2 w-2/3 min-w-36" />
+            </div>
+            <Skeleton className="h-6 w-16 shrink-0 rounded-full" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }

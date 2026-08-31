@@ -4,7 +4,7 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate } from '../../lib/format'
 import type { Device, MeshNetwork, NetworkPeerPath } from '../../types'
-import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, Spinner } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader } from '../../components/ui'
 
 const fieldClass = 'mt-2 block w-full rounded-xl border-0 bg-slate-50 px-4 py-3 text-sm ring-1 ring-inset ring-slate-200 focus:bg-white focus:ring-2 focus:ring-indigo-600'
 
@@ -155,7 +155,7 @@ export function NetworksPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
         {notice && <Notice tone="success" message={notice} onClose={() => setNotice(null)} />}
       </div>
 
-      {loading ? <div className="flex min-h-80 items-center justify-center"><Spinner /></div> : networks.length === 0 ? (
+      {loading ? <LoadingState className="mt-6 min-h-[24rem]" rows={4} /> : networks.length === 0 ? (
         <Card className="mt-6"><EmptyState icon={Network} title="还没有 Virtual Network" description="创建一个 Network，然后从已批准设备中选择成员。CIDR 留空时将从 10.77.0.0/16 自动分配 /24 子网。" action={<Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" aria-hidden="true" />创建第一个 Network</Button>} /></Card>
       ) : (
         <div className="mt-6 grid gap-5 xl:grid-cols-2">

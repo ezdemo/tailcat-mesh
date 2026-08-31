@@ -4,7 +4,7 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, formatRelativeDate, shorten } from '../../lib/format'
 import type { Connection, ConnectionPathType, ConnectionStatus } from '../../types'
-import { Badge, Button, Card, EmptyState, Notice, PageHeader, Spinner } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, LoadingState, Notice, PageHeader } from '../../components/ui'
 
 const statusLabels: Record<ConnectionStatus, string> = {
   ONLINE: '在线',
@@ -84,12 +84,12 @@ export function ConnectionsPage({ api, onUnauthorized }: { api: TailcatMeshApi; 
 
       <Card className="mt-6 overflow-hidden">
         {loading ? (
-          <div className="flex min-h-80 items-center justify-center"><Spinner /></div>
+          <LoadingState />
         ) : connections.length === 0 ? (
           <EmptyState icon={Cable} title="还没有 Peer 路径状态" description="批准同一 Mesh 中的两台设备，并让 Agent 完成首次 Peer 检查后，连接会显示在这里。" />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100">
+            <table className="min-w-full table-fixed divide-y divide-slate-100">
               <thead className="bg-slate-50/70">
                 <tr>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:px-6">连接</th>

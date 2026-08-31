@@ -4,7 +4,7 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, isTokenActive } from '../../lib/format'
 import type { CreatedEnrollmentToken, EnrollmentToken } from '../../types'
-import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, Spinner } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader } from '../../components/ui'
 
 export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUnauthorized: () => void }) {
   const [tokens, setTokens] = useState<EnrollmentToken[]>([])
@@ -118,12 +118,12 @@ export function EnrollmentTokensPage({ api, onUnauthorized }: { api: TailcatMesh
 
       <Card className="mt-6 overflow-hidden">
         {loading ? (
-          <div className="flex min-h-80 items-center justify-center"><Spinner /></div>
+          <LoadingState />
         ) : tokens.length === 0 ? (
           <EmptyState icon={KeyRound} title="还没有加入凭证" description="创建一个凭证，然后把它交给需要加入 Mesh 的设备管理员。" action={<Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4" aria-hidden="true" />创建第一个凭证</Button>} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100">
+            <table className="min-w-full table-fixed divide-y divide-slate-100">
               <thead className="bg-slate-50/70">
                 <tr>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:px-6">凭证</th>

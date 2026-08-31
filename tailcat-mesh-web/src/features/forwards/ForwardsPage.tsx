@@ -4,7 +4,7 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, shorten } from '../../lib/format'
 import type { Device, Forward, ForwardRequest, ForwardStatus, Service } from '../../types'
-import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, Spinner } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader } from '../../components/ui'
 
 const statusLabels: Record<ForwardStatus, string> = {
   STARTING: '启动中',
@@ -183,12 +183,12 @@ export function ForwardsPage({ api, onUnauthorized }: { api: TailcatMeshApi; onU
 
       <Card className="mt-6 overflow-hidden">
         {loading ? (
-          <div className="flex min-h-80 items-center justify-center"><Spinner /></div>
+          <LoadingState />
         ) : forwards.length === 0 ? (
           <EmptyState icon={ArrowRightLeft} title="还没有本地转发" description="先发布一个远端 TCP 服务，再把它映射到某台源设备的本地端口。" action={<Button onClick={openCreate} disabled={usableDevices.length < 1}><Plus className="h-4 w-4" aria-hidden="true" />新建第一个转发</Button>} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100">
+            <table className="min-w-full table-fixed divide-y divide-slate-100">
               <thead className="bg-slate-50/70">
                 <tr>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:px-6">名称</th>

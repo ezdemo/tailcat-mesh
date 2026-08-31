@@ -5,7 +5,7 @@ import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, formatRelativeDate, isTokenActive, shorten, statusLabels, statusStyles } from '../../lib/format'
 import type { Device, EnrollmentToken, Forward, Service } from '../../types'
 import type { ViewId } from '../../components/AppShell'
-import { Badge, Button, Card, Notice, PageHeader, Spinner, cn } from '../../components/ui'
+import { Badge, Button, Card, Notice, PageHeader, Skeleton, Spinner, cn } from '../../components/ui'
 
 export function DashboardPage({
   api,
@@ -76,7 +76,7 @@ export function DashboardPage({
       {error && <div className="mb-6"><Notice tone="error" title="加载失败" message={error} onClose={() => setError(null)} /></div>}
 
       {loading ? (
-        <div className="flex min-h-80 items-center justify-center"><Spinner /></div>
+        <DashboardLoading />
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -89,7 +89,7 @@ export function DashboardPage({
           </div>
 
           <div className="mt-6 grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
-            <Card className="overflow-hidden">
+            <Card className="min-h-[340px] overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-950">最近设备</h2>
@@ -111,7 +111,7 @@ export function DashboardPage({
               )}
             </Card>
 
-            <Card className="p-6">
+            <Card className="min-h-[340px] p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">加入流程</p>
@@ -133,6 +133,70 @@ export function DashboardPage({
   )
 }
 
+function DashboardLoading() {
+  return (
+    <div className="space-y-6" role="status" aria-label="加载中">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 6 }, (_, index) => (
+          <Card key={index} className="min-h-[136px] p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-3">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-8 w-12" />
+              </div>
+              <Skeleton className="h-10 w-10 rounded-xl" />
+            </div>
+            <Skeleton className="mt-4 h-2 w-28" />
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+        <Card className="min-h-[340px] overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-2 w-36" />
+            </div>
+            <Spinner className="h-4 w-4" />
+          </div>
+          <div className="divide-y divide-slate-100 px-5 sm:px-6">
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="flex min-h-14 items-center gap-4 py-3">
+                <Skeleton className="h-10 w-10 shrink-0 rounded-xl" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-3 w-1/3 min-w-28" />
+                  <Skeleton className="h-2 w-2/3 min-w-40" />
+                </div>
+                <Skeleton className="h-6 w-16 shrink-0 rounded-full" />
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="min-h-[340px] p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-3">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-5 w-36" />
+            </div>
+            <Skeleton className="h-10 w-10 rounded-xl" />
+          </div>
+          <div className="mt-8 space-y-5">
+            {Array.from({ length: 3 }, (_, index) => (
+              <div key={index} className="flex items-center gap-3">
+                <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+                <Skeleton className="h-3 w-40" />
+              </div>
+            ))}
+          </div>
+          <Skeleton className="mt-8 h-11 w-full rounded-lg" />
+        </Card>
+      </div>
+    </div>
+  )
+}
+
 function StatCard({ label, value, detail, icon: Icon, tint }: {
   label: string
   value: number
@@ -147,7 +211,7 @@ function StatCard({ label, value, detail, icon: Icon, tint }: {
     violet: 'bg-violet-50 text-violet-600',
   }
   return (
-    <Card className="p-5">
+    <Card className="min-h-[136px] p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-slate-500">{label}</p>

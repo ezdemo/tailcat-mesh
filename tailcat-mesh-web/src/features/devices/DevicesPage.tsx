@@ -4,7 +4,7 @@ import type { TailcatMeshApi } from '../../api/client'
 import { errorMessage, isUnauthorized } from '../../lib/errors'
 import { formatDate, formatRelativeDate, shorten, statusLabels, statusStyles } from '../../lib/format'
 import type { Device, DeviceStatus, DeviceVirtualNetwork } from '../../types'
-import { Badge, Button, Card, EmptyState, Modal, Notice, PageHeader, Spinner, cn } from '../../components/ui'
+import { Badge, Button, Card, EmptyState, LoadingState, Modal, Notice, PageHeader, cn } from '../../components/ui'
 
 const filters: Array<{ value: 'ALL' | DeviceStatus; label: string }> = [
   { value: 'ALL', label: '全部' },
@@ -141,7 +141,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
         </div>
 
         {loading ? (
-          <div className="flex min-h-80 items-center justify-center"><Spinner /></div>
+          <LoadingState />
         ) : filteredDevices.length === 0 ? (
           <EmptyState
             icon={Laptop}
@@ -150,7 +150,7 @@ export function DevicesPage({ api, onUnauthorized }: { api: TailcatMeshApi; onUn
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-slate-100">
+            <table className="min-w-full table-fixed divide-y divide-slate-100">
               <thead className="bg-slate-50/70">
                 <tr>
                   <th className="px-5 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:px-6">设备</th>
