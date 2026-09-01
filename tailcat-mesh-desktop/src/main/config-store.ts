@@ -38,6 +38,14 @@ export class ConfigStore {
   }
 
   private defaults(): DesktopSettings {
-    return normalizedSettings({ serverUrl: "", deviceName: defaultDeviceName(), launchAtStartup: true });
+    return normalizedSettings({
+      serverUrl: "",
+      deviceName: defaultDeviceName(),
+      launchAtStartup: true,
+      startMinimized: true,
+      theme: "system",
+      language: "zh-CN",
+      proxy: { type: "none", host: "", port: null }
+    });
   }
 }

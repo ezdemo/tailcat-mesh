@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('控制面总览', 'overview', ~{::content})}">
+<section th:fragment="content">
+    <div class="page-head">
+        <div>
+            <p class="eyebrow">Workspace overview</p>
+            <h1>控制面总览</h1>
+            <p class="page-description">查看设备健康状态、待处理审批和加入凭证。</p>
+        </div>
+        <a class="button button-secondary" th:href="@{/admin/overview}"><span aria-hidden="true">↻</span>刷新</a>
+    </div>
+
+    <section class="stats-grid" aria-label="控制面统计">
+        <article class="stat-card">
+            <div><p>设备总数</p><strong th:text="${stats.total}">0</strong></div><span class="stat-icon tone-indigo">▣</span>
+            <small>已登记设备</small>
+        </article>
+        <article class="stat-card">
+            <div><p>在线设备</p><strong th:text="${stats.online}">0</strong></div><span class="stat-icon tone-green">⌁</span>
+            <small th:text="${stats.total > 0 ? stats.onlineRate + '% 在线率' : '等待 Agent 上报'}">等待 Agent 上报</small>
+        </article>
+        <article class="stat-card">
+            <div><p>待审批</p><strong th:text="${stats.pending}">0</strong></div><span class="stat-icon tone-amber">✓</span>
+            <small th:text="${stats.pending > 0 ? '需要管理员处理' : '没有待处理申请'}">没有待处理申请</small>
+        </article>
+        <article class="stat-card">
+            <div><p>有效加入凭证</p><strong th:text="${stats.activeTokens}">0</strong></div><span class="stat-icon tone-violet">⚿</span>
+            <small>可继续邀请设备</small>
+        </article>
+        <article class="stat-card">
+            <div><p>服务</p><strong th:text="${stats.services}">0</strong></div><span class="stat-icon tone-indigo">▤</span>
+            <small>已启用的 TCP 服务</small>
+        </article>
+        <article class="stat-card">
+            <div><p>活动转发</p><strong th:text="${stats.activeForwards}">0</strong></div><span class="stat-icon tone-green">⇄</span>
+            <small>本地监听已就绪</small>
+        </article>
+    </section>
+
+    <div class="content-grid overview-grid">
+        <section class="card">
+            <div class="card-head">
+                <div><h2>最近设备</h2><p>按最近一次状态变更排序</p></div>
+                <a class="text-button" th:href="@{/admin/devices}">查看全部 <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="device-list" th:if="${!#lists.isEmpty(recentDevices)}">
+                <a class="device-row" th:each="device : ${recentDevices}"
+                   th:href="@{/admin/devices/{id}(id=${device.id})}">
+                    <span class="avatar-icon">▣</span>
+                    <span class="row-main">
+                        <span class="row-title"><b th:text="${device.name}">device</b>
+                            <span class="badge" th:classappend="${@adminWeb.deviceClass(device.status)}"
+                                  th:text="${@adminWeb.deviceStatus(device.status)}">在线</span>
+                        </span>
+                        <small th:text="${device.hostname + ' · ' + device.os + '/' + device.arch}">host · linux/amd64</small>
+                    </span>
+                    <span class="row-meta"><b th:text="${@adminWeb.relative(device.lastSeenAt)}">刚刚</b><small th:text="${@adminWeb.date(device.lastSeenAt)}">—</small></span>
+                    <span class="row-arrow" aria-hidden="true">→</span>
+                </a>
+            </div>
+            <div class="empty-state compact" th:if="${#lists.isEmpty(recentDevices)}">
+                <span class="empty-icon">▣</span><h3>还没有设备</h3>
+                <p>创建加入凭证后，让第一台 Agent 注册进来。</p>
+                <a class="button button-primary" th:href="@{/admin/tokens?create=true}">创建加入凭证</a>
+            </div>
+        </section>
+
+        <section class="card onboarding-card">
+            <div class="card-head no-border">
+                <div><p class="eyebrow">加入流程</p><h2>邀请一台新设备</h2></div><span class="stat-icon tone-indigo">⚿</span>
+            </div>
+            <ol class="step-list">
+                <li th:classappend="${stats.activeTokens > 0} ? ' is-done' : ''"><span>01</span><b>创建加入凭证</b><em th:if="${stats.activeTokens > 0}">完成</em><i th:unless="${stats.activeTokens > 0}">待处理</i></li>
+                <li th:classappend="${stats.total > 0} ? ' is-done' : ''"><span>02</span><b>用户运行 Agent connect</b><em th:if="${stats.total > 0}">完成</em><i th:unless="${stats.total > 0}">待处理</i></li>
+                <li th:classappend="${stats.pending == 0 and stats.total > 0} ? ' is-done' : ''"><span>03</span><b>审批待加入设备</b><em th:if="${stats.pending == 0 and stats.total > 0}">完成</em><i th:unless="${stats.pending == 0 and stats.total > 0}">待处理</i></li>
+            </ol>
+            <a class="button button-primary button-block" th:href="@{/admin/tokens}">管理加入凭证 <span aria-hidden="true">→</span></a>
+        </section>
+    </div>
+</section>
+</html>

@@ -26,25 +26,36 @@ never written to Desktop settings or Agent configuration. The Java Agent stores
 only its control-plane credential and exposes a token-protected, loopback-only
 local status channel for the Desktop shell.
 
+The desktop UI intentionally keeps runtime implementation details out of the
+normal user surface. General settings contain only the Server URL and Device
+Name; appearance, startup, troubleshooting, and About are separate desktop
+settings sections. Existing proxy values, when present in the local settings
+file, remain an Agent-owned implementation detail and are not exposed by the
+ordinary UI.
+
 ## Build
 
-Build the Java Agent first, then install the Desktop dependencies and create an
-NSIS installer:
+Install the Desktop dependencies and create an NSIS installer. The packaging
+command builds the current Java Agent, stages it under `resources/agent`, and
+puts it into the installer as `resources/agent/tailcat-mesh-agent.jar`:
 
 ```powershell
-mvn -pl tailcat-mesh-agent -am package
 cd tailcat-mesh-desktop
 npm install
 npm run dist
 ```
 
-`npm run dist` stages the shaded Agent JAR into the installer build area. The
-Tailcat, tun2socks, Wintun, and Java runtime assets remain on-demand, versioned
+The Tailcat, tun2socks, Wintun, and Java runtime assets remain on-demand, versioned
 runtime dependencies managed by the Java Agent; the installer contains no
 PowerShell Bootstrap directory.
 
 For a local UI build without packaging, run `npm run build`; `npm run dev`
-opens the Electron shell. The Desktop main process starts Java only after a
+opens the Electron shell. To preview the complete UI with deterministic mock
+data without starting the Java Agent, run `npm run build` followed by
+`electron . --mock-ui=1`. Other mock scenarios include `offline`,
+`reconnecting`, `error`, `empty`, `connecting`, and `enrollment`.
+
+The Desktop main process starts Java only after a
 saved enrollment exists or the user submits Connect. On a Windows machine,
 the packaged executable requests administrator privileges once at launch so
 the Java child can create Wintun adapters and routes when the Server enables a

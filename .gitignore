@@ -15,15 +15,8 @@ data/
 agent.yml
 application-local.yml
 
-# Frontend dependencies and build output
-tailcat-mesh-web/node_modules/
-tailcat-mesh-web/dist/
-tailcat-mesh-web/.env
-
 # Java and OS noise
 *.class
 hs_err_pid*.log
 .DS_Store
 Thumbs.db
-/tailcat-mesh-web/pnpm-lock.yaml
-/tailcat-mesh-web/pnpm-workspace.yaml

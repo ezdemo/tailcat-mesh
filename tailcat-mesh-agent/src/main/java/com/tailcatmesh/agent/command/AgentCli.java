@@ -45,12 +45,12 @@ public final class AgentCli {
                 stdout.println("Downloading official Tailcat " + config.tailcatVersion()
                         + " for " + TailcatBinaryDownloader.currentPlatform() + "...");
             }
-            Path tailcatBinary = new TailcatBinaryDownloader().ensure(
+            Path tailcatBinary = new TailcatBinaryDownloader(config.proxy()).ensure(
                     config.tailcatBinary(), config.tailcatVersion(), config.tailcatAutoDownload());
             TailcatCliEngine engine = new TailcatCliEngine(new TailcatCliEngineConfig(
                     tailcatBinary,
                     config.dataDir(),
-                    Map.of(),
+                    config.proxy() == null ? Map.of() : config.proxy().environment(),
                     Duration.ofSeconds(15),
                     Duration.ofSeconds(20),
                     false
@@ -119,5 +119,7 @@ public final class AgentCli {
         output.println("YAML tailcat settings:");
         output.println("  tailcat.version          pinned official Tailcat release (default: 0.3.0)");
         output.println("  tailcat.autoDownload     download absent binary to ~/.tailcat-mesh");
+        output.println("  proxy.type               optional http or socks5 proxy");
+        output.println("  proxy.host / proxy.port  local proxy endpoint; credentials are not supported");
     }
 }

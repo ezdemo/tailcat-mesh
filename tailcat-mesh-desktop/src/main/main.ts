@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, Menu, shell } from "electron";
-import { existsSync } from "node:fs";
+import { app, BrowserWindow, dialog, Menu, nativeTheme, shell } from "electron";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentSupervisor } from "./agent-supervisor.js";
@@ -7,6 +7,7 @@ import { ConfigStore } from "./config-store.js";
 import { registerIpcHandlers } from "./ipc.js";
 import { createDesktopPaths } from "./paths.js";
 import { TrayController } from "./tray.js";
+import type { LanguagePreference, ThemePreference } from "../shared/types.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +24,8 @@ let unsubscribeState: (() => void) | null = null;
 let quitting = false;
 let quitPromise: Promise<void> | null = null;
 let startupSettings = true;
+let themePreference: ThemePreference = "system";
+let languagePreference: LanguagePreference = "zh-CN";
 
 if (gotSingleInstanceLock) {
   app.on("second-instance", () => {
@@ -62,6 +65,9 @@ async function initialize(): Promise<void> {
   configStore = new ConfigStore(app.getPath("userData"));
   const settings = await configStore.load();
   startupSettings = settings.launchAtStartup;
+  themePreference = settings.theme;
+  languagePreference = settings.language;
+  applyTheme(themePreference);
   applyLaunchAtStartup(startupSettings);
 
   supervisor = new AgentSupervisor(paths);
@@ -74,10 +80,18 @@ async function initialize(): Promise<void> {
     async (enabled) => {
       startupSettings = enabled;
       applyLaunchAtStartup(enabled);
+    },
+    async (theme) => {
+      themePreference = theme;
+      applyTheme(theme);
+    },
+    async (language) => {
+      languagePreference = language;
+      tray?.update(supervisor?.getRuntimeState() ?? emptyState(), startupSettings, languagePreference);
     }
   );
   unsubscribeState = supervisor.onStateChange((state) => {
-    tray?.update(state, startupSettings);
+    tray?.update(state, startupSettings, languagePreference);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("desktop:state-changed", state);
     }
@@ -91,18 +105,27 @@ async function initialize(): Promise<void> {
       startupSettings = enabled;
       await configStore?.save({ launchAtStartup: enabled });
       applyLaunchAtStartup(enabled);
-      tray?.update(supervisor?.getRuntimeState() ?? emptyState(), startupSettings);
+      tray?.update(supervisor?.getRuntimeState() ?? emptyState(), startupSettings, languagePreference);
     },
     quit: async () => app.quit()
   });
-  tray.update(supervisor.getRuntimeState(), startupSettings);
+  tray.update(supervisor.getRuntimeState(), startupSettings, languagePreference);
+
+  if (hasMockPreview()) {
+    // The preview renderer owns its deterministic theme; keep native overlay
+    // controls in sync with the light initial preview until a theme is chosen.
+    themePreference = "light";
+    applyTheme(themePreference);
+    createWindow();
+    return;
+  }
 
   const enrolled = await supervisor.hasEnrollment();
   if (enrolled) {
     void supervisor.startExisting().catch((error: unknown) => {
       showStartupError(error);
     });
-    if (!process.argv.includes("--hidden")) {
+    if (!process.argv.includes("--hidden") || !settings.startMinimized) {
       createWindow();
     }
   } else {
@@ -111,18 +134,37 @@ async function initialize(): Promise<void> {
 }
 
 function resolveDevAgentJarPath(resourceRoot: string): string {
-  const repositoryJar = path.resolve(
+  const repositoryTarget = path.resolve(
     moduleDirectory,
     "..",
     "..",
     "..",
     "tailcat-mesh-agent",
-    "target",
-    "tailcat-mesh-agent-0.1.0-SNAPSHOT.jar"
+    "target"
   );
-  return existsSync(repositoryJar)
-    ? repositoryJar
-    : path.join(resourceRoot, "agent", "tailcat-mesh-agent.jar");
+  try {
+    const repositoryJar = readdirSync(repositoryTarget)
+      .filter((name) => name.startsWith("tailcat-mesh-agent-")
+        && name.endsWith(".jar")
+        && !name.startsWith("original-"))
+      .sort((left, right) => {
+      const leftIsShaded = left.endsWith("-shaded.jar");
+      const rightIsShaded = right.endsWith("-shaded.jar");
+      if (leftIsShaded !== rightIsShaded) {
+        // The shaded artifact is self-contained. A stale thin artifact can
+        // start successfully and only fail later when a protocol type is
+        // loaded during shutdown or runtime reporting.
+        return leftIsShaded ? -1 : 1;
+      }
+        return right.localeCompare(left, undefined, { numeric: true });
+      })[0];
+    if (repositoryJar && existsSync(path.join(repositoryTarget, repositoryJar))) {
+      return path.join(repositoryTarget, repositoryJar);
+    }
+  } catch {
+    // Fall back to the staged resource when the Maven target does not exist.
+  }
+  return path.join(resourceRoot, "agent", "tailcat-mesh-agent.jar");
 }
 
 function createWindow(): void {
@@ -132,21 +174,17 @@ function createWindow(): void {
     return;
   }
   mainWindow = new BrowserWindow({
-    width: 1080,
+    width: 1120,
     height: 760,
-    minWidth: 820,
-    minHeight: 600,
+    minWidth: 920,
+    minHeight: 620,
     title: "Tailcat Mesh",
+    icon: resolveLogoIconPath(),
     titleBarStyle: "hidden",
-    titleBarOverlay: {
-      color: "#efede7",
-      symbolColor: "#5a574f",
-      height: 32
-    },
-    // Show the shell immediately so a renderer/preload issue cannot leave the
-    // desktop invisible while the native window is already running.
-    show: true,
-    backgroundColor: "#f7f5ef",
+    titleBarOverlay: titleBarOverlayOptions(),
+    // Wait until the first frame is ready so the shell never flashes blank.
+    show: false,
+    backgroundColor: isDarkTheme() ? "#111418" : "#F6F7F9",
     webPreferences: {
       preload: path.join(moduleDirectory, "..", "preload", "preload.cjs"),
       contextIsolation: true,
@@ -163,8 +201,43 @@ function createWindow(): void {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
-  void mainWindow.loadFile(path.join(moduleDirectory, "..", "renderer", "index.html"));
   mainWindow.once("ready-to-show", () => mainWindow?.show());
+  const mockScenario = process.argv.find((argument) => argument.startsWith("--mock-ui="))?.slice(10)
+    ?? (process.argv.includes("--mock-ui") ? "1" : null);
+  const filePath = path.join(moduleDirectory, "..", "renderer", "index.html");
+  void mainWindow.loadFile(filePath, mockScenario ? { query: { mock: mockScenario } } : undefined);
+}
+
+function resolveLogoIconPath(): string {
+  const resourceRoot = app.isPackaged
+    ? process.resourcesPath
+    : path.resolve(moduleDirectory, "..", "..", "resources");
+  return path.join(resourceRoot, "tailcat-mesh-logo.png");
+}
+
+function hasMockPreview(): boolean {
+  return process.argv.some((argument) => argument === "--mock-ui" || argument.startsWith("--mock-ui="));
+}
+
+function applyTheme(theme: ThemePreference): void {
+  nativeTheme.themeSource = theme;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setTitleBarOverlay(titleBarOverlayOptions());
+  }
+}
+
+function titleBarOverlayOptions(): Electron.TitleBarOverlayOptions {
+  const dark = isDarkTheme();
+  return {
+    color: dark ? "#181C21" : "#FFFFFF",
+    symbolColor: dark ? "#D8DEE7" : "#475467",
+    height: 48
+  };
+}
+
+function isDarkTheme(): boolean {
+  return themePreference === "dark"
+    || (themePreference === "system" && nativeTheme.shouldUseDarkColors);
 }
 
 function showWindow(): void {

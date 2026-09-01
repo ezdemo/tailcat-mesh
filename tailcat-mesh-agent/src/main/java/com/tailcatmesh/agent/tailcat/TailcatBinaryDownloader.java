@@ -1,5 +1,7 @@
 package com.tailcatmesh.agent.tailcat;
 
+import com.tailcatmesh.agent.config.NetworkProxyConfig;
+
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.EOFException;
@@ -52,11 +54,22 @@ public final class TailcatBinaryDownloader {
     private final Platform platform;
 
     public TailcatBinaryDownloader() {
-        this(HttpClient.newBuilder()
-                        .connectTimeout(CONNECT_TIMEOUT)
-                        .followRedirects(HttpClient.Redirect.NORMAL)
-                        .build(),
+        this((NetworkProxyConfig) null);
+    }
+
+    public TailcatBinaryDownloader(NetworkProxyConfig proxy) {
+        this(createHttpClient(proxy),
                 DEFAULT_RELEASE_BASE, DEFAULT_ARTIFACTS, Platform.detect());
+    }
+
+    private static HttpClient createHttpClient(NetworkProxyConfig proxy) {
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT)
+                .followRedirects(HttpClient.Redirect.NORMAL);
+        if (proxy != null) {
+            builder.proxy(proxy.proxySelector());
+        }
+        return builder.build();
     }
 
     TailcatBinaryDownloader(HttpClient httpClient, URI releaseBase,

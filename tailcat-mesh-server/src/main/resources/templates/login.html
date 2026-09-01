@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>登录 · Tailcat Mesh</title>
+    <link rel="stylesheet" th:href="@{/css/admin.css}">
+</head>
+<body class="login-page">
+<main class="login-layout">
+    <section class="login-intro">
+        <div class="brand brand-login">
+            <a class="brand-link" href="/">
+                <span class="brand-mark" aria-hidden="true">⌁</span>
+                <span><strong>Tailcat Mesh</strong><small>Control Plane</small></span>
+            </a>
+        </div>
+        <div class="intro-copy">
+            <p class="eyebrow">Self-hosted network control</p>
+            <h1>让 Mesh 管理<br><em>回到 Server。</em></h1>
+            <p>设备、Virtual LAN、TCP 服务和 Direct / DERP 路径，都在一个清晰的控制面里完成。</p>
+        </div>
+        <div class="intro-note"><span class="status-dot"></span><span>同源服务端渲染 · 无需单独前端服务</span></div>
+    </section>
+
+    <section class="login-panel">
+        <div class="login-card">
+            <div class="login-card-heading">
+                <span class="eyebrow">Administrator access</span>
+                <h2>登录控制台</h2>
+                <p>使用 Server 配置的管理员账号继续。</p>
+            </div>
+            <div class="flash flash-error" th:if="${loginError != null}" th:text="${loginError}" role="alert">用户名或密码不正确，请重试。</div>
+            <div class="flash flash-success" th:if="${param.loggedOut != null}" role="status">已安全退出登录。</div>
+            <form class="stack-form" method="post" th:action="@{/login}">
+                <input type="hidden" name="redirect" th:value="${redirect}">
+                <input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
+                <label>
+                    <span>用户名</span>
+                    <input name="username" type="text" autocomplete="username" required autofocus placeholder="admin">
+                </label>
+                <label>
+                    <span>密码</span>
+                    <input name="password" type="password" autocomplete="current-password" required placeholder="输入管理员密码">
+                </label>
+                <button class="button button-primary button-block" type="submit">进入控制台 <span aria-hidden="true">→</span></button>
+            </form>
+            <p class="login-help">默认开发账号：<code>admin / change-me</code>。部署到非本机环境前请修改 <code>ADMIN_PASSWORD</code>。</p>
+        </div>
+    </section>
+</main>
+</body>
+</html>

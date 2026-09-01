@@ -112,6 +112,7 @@ public final class AgentRuntime implements AutoCloseable {
             });
     private final CountDownLatch termination = new CountDownLatch(1);
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final CompletableFuture<Void> startupCompletion = new CompletableFuture<>();
 
     private volatile AgentState state;
     private volatile TailcatIdentity identity;
@@ -121,6 +122,9 @@ public final class AgentRuntime implements AutoCloseable {
     private volatile ScheduledFuture<?> peerPingTask;
     private volatile String serverConnBlobHash;
     private volatile String controlPlaneStatus = "PENDING";
+    private volatile String agentState = "STARTING";
+    private volatile boolean initialSyncFinished;
+    private volatile Thread startupThread;
     private volatile long desiredRevision;
     private volatile AgentDesiredState desiredState;
     private volatile AgentDesiredState pendingDesiredStateFallback;
@@ -186,27 +190,32 @@ public final class AgentRuntime implements AutoCloseable {
             identity = tailcatEngine.ensureIdentity(new TailcatIdentityConfig(
                     config.serverKeyPath(), config.clientKeyPath()));
             state = loadOrEnroll(enrollmentToken, identity);
-            AgentDesiredState initialDesiredState = controlClient.desiredState(state.agentCredential());
-            reconcileDesiredState(initialDesiredState, true);
-            sendHeartbeat();
-            openWebSocket();
+
+            // The Desktop only needs a trustworthy loopback status channel to
+            // become responsive. Network reconciliation can involve several
+            // long-lived child processes and must not block the Agent bootstrap
+            // thread or make one optional component failure fatal to the whole
+            // runtime.
+            localStatusServer = new AgentLocalStatusServer(
+                    config.dataDir(), this::localStatus, this::reconnect, this::close);
+            localStatusServer.start();
+            agentState = "RUNNING";
+            // From this point on the Agent process is ready to serve status and
+            // control requests. Tailcat/Peer/TUN work is component startup,
+            // not a reason to keep the whole Desktop in a blocked state.
+            initialSyncFinished = true;
             heartbeatTask = heartbeatExecutor.scheduleAtFixedRate(this::heartbeatSafely,
                     config.heartbeatInterval().toSeconds(), config.heartbeatInterval().toSeconds(), TimeUnit.SECONDS);
             peerPingTask = peerPingExecutor.scheduleAtFixedRate(this::peerPingSafely,
                     0, config.peerPingInterval().toSeconds(), TimeUnit.SECONDS);
-            localStatusServer = new AgentLocalStatusServer(
-                    config.dataDir(), this::localStatus, this::reconnect, this::close);
-            localStatusServer.start();
 
-            String status = currentServerStatus();
-            output.println("Tailcat Mesh Agent connected; device=" + state.deviceId() + ", status=" + status);
-            if ("PENDING".equals(status)) {
-                output.println("Waiting for administrator approval; keep this process running.");
-            }
-            output.println("Tailcat server is running; ConnBlob is stored by the control plane (hash="
-                    + serverConnBlobHash + ")");
+            startupThread = Thread.ofVirtual()
+                    .name("tailcat-mesh-agent-startup")
+                    .start(this::initializeRuntimeInBackground);
+            output.println("Tailcat Mesh Agent starting; device=" + state.deviceId());
+            output.println("Local status channel is ready; network components are starting in the background.");
             output.flush();
-            return new StartupResult(state.deviceId(), status, serverHandle.listenAddress());
+            return new StartupResult(state.deviceId(), "STARTING", null);
         } catch (RuntimeException exception) {
             close();
             throw exception;
@@ -217,6 +226,7 @@ public final class AgentRuntime implements AutoCloseable {
     public int run(String enrollmentToken, boolean once, PrintWriter output) {
         start(enrollmentToken, output);
         if (once) {
+            awaitInitialStartup();
             close();
             return 0;
         }
@@ -251,6 +261,11 @@ public final class AgentRuntime implements AutoCloseable {
             termination.countDown();
             return;
         }
+        Thread startup = startupThread;
+        if (startup != null) {
+            startup.interrupt();
+        }
+        startupCompletion.complete(null);
         ScheduledFuture<?> task = heartbeatTask;
         if (task != null) {
             task.cancel(false);
@@ -350,6 +365,7 @@ public final class AgentRuntime implements AutoCloseable {
     private AgentState loadOrEnroll(String enrollmentToken, TailcatIdentity localIdentity) {
         Optional<AgentState> saved = stateStore.load();
         if (saved.isPresent()) {
+            controlPlaneStatus = "CONNECTING";
             return saved.get();
         }
         if (enrollmentToken == null || enrollmentToken.isBlank()) {
@@ -377,13 +393,91 @@ public final class AgentRuntime implements AutoCloseable {
         return result;
     }
 
+    /** Performs slow control-plane and component reconciliation outside bootstrap. */
+    private void initializeRuntimeInBackground() {
+        try {
+            if (closed.get()) {
+                return;
+            }
+            try {
+                AgentDesiredState initialDesiredState = controlClient.desiredState(state.agentCredential());
+                if (!closed.get()) {
+                    // A successful desired-state response proves that the
+                    // Control Server is reachable. The subsequent component
+                    // reconciliation may still take longer, especially when a
+                    // peer or Wintun is unavailable.
+                    controlPlaneStatus = "ONLINE";
+                    // A failed Peer SOCKS or virtual LAN must be represented in
+                    // its component runtime, not terminate the Agent process.
+                    reconcileDesiredState(initialDesiredState, false);
+                }
+            } catch (RuntimeException exception) {
+                markControlPlaneFailure("initial desired-state sync failed", exception);
+            }
+
+            if (!closed.get()) {
+                try {
+                    sendHeartbeat();
+                } catch (RuntimeException exception) {
+                    markControlPlaneFailure("initial heartbeat failed", exception);
+                }
+            }
+            // The local API was already available and the Agent process is
+            // healthy even when an optional data-plane component is degraded.
+            announceStartupResult();
+            if (!closed.get()) {
+                openWebSocket();
+            }
+        } finally {
+            startupCompletion.complete(null);
+            startupThread = null;
+        }
+    }
+
+    private void awaitInitialStartup() {
+        try {
+            startupCompletion.get();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+        } catch (java.util.concurrent.ExecutionException ignored) {
+            // Startup failures are exposed through the local status channel;
+            // --once remains a best-effort diagnostic command.
+        }
+    }
+
+    private void announceStartupResult() {
+        PrintWriter currentOutput = output;
+        AgentState currentState = state;
+        if (currentOutput == null || currentState == null || closed.get()) {
+            return;
+        }
+        String status = currentServerStatus();
+        currentOutput.println("Tailcat Mesh Agent startup finished; device="
+                + currentState.deviceId() + ", status=" + status);
+        if ("PENDING".equals(status)) {
+            currentOutput.println("Waiting for administrator approval; keep this process running.");
+        }
+        if (serverHandle != null) {
+            currentOutput.println("Tailcat server is running; ConnBlob is stored by the control plane (hash="
+                    + serverConnBlobHash + ")");
+        } else {
+            currentOutput.println("Tailcat server is not ready; the next heartbeat will retry it.");
+        }
+        currentOutput.flush();
+    }
+
     /** Refreshes desired state through the authenticated control channel. */
     public void reconnect() {
         if (closed.get() || state == null) {
             throw new IllegalStateException("Agent is not running");
         }
-        reconcileDesiredState(controlClient.desiredState(state.agentCredential()), false);
-        sendHeartbeat();
+        try {
+            reconcileDesiredState(controlClient.desiredState(state.agentCredential()), false);
+            sendHeartbeat();
+        } catch (RuntimeException exception) {
+            markControlPlaneFailure("manual reconnect failed", exception);
+            throw exception;
+        }
     }
 
     /** Returns the non-secret projection used by the loopback Desktop API. */
@@ -397,9 +491,18 @@ public final class AgentRuntime implements AutoCloseable {
         }
         boolean tailcatRunning = runtimeStatus.state() == ProcessState.RUNNING;
         String controlStatus = controlPlaneStatus == null ? "UNKNOWN" : controlPlaneStatus;
-        String status = tailcatRunning
-                ? ("ONLINE".equalsIgnoreCase(controlStatus) ? "CONNECTED" : "PENDING")
-                : "DEGRADED";
+        String status;
+        if (!initialSyncFinished || "CONNECTING".equalsIgnoreCase(controlStatus)) {
+            status = "CONNECTING";
+        } else if (isControlPlaneOffline(controlStatus)) {
+            status = "RECONNECTING";
+        } else if (tailcatRunning) {
+            status = "ONLINE".equalsIgnoreCase(controlStatus) ? "CONNECTED" : "PENDING";
+        } else {
+            // The Agent and Control Server can be ready while Tailcat is still
+            // starting or one optional data-plane component is retrying.
+            status = "RECONNECTING";
+        }
 
         Map<UUID, AgentVirtualNetworkRuntime> runtimeByNetwork = new HashMap<>();
         for (AgentVirtualNetworkRuntime runtime : virtualNetworkManager.snapshot()) {
@@ -422,7 +525,7 @@ public final class AgentRuntime implements AutoCloseable {
                 state == null ? null : state.deviceId(),
                 configuredDeviceName(),
                 config.serverUrl().toString(),
-                "RUNNING",
+                agentState,
                 ProcessHandle.current().pid(),
                 safeTailcatVersion(),
                 runtimeStatus.state().name(),
@@ -435,11 +538,11 @@ public final class AgentRuntime implements AutoCloseable {
         if (state == null) {
             return;
         }
-        refreshRuntimeState();
-        refreshServiceRuntime();
-        refreshForwardRuntime();
-        refreshVirtualNetworkRuntime();
-        TailcatRuntimeStatus runtimeStatus = tailcatEngine.getRuntimeStatus();
+        runMaintenanceSafely("Tailcat runtime refresh", this::refreshRuntimeState);
+        runMaintenanceSafely("ServiceBridge runtime refresh", this::refreshServiceRuntime);
+        runMaintenanceSafely("Local Forward runtime refresh", this::refreshForwardRuntime);
+        runMaintenanceSafely("virtual-network runtime refresh", this::refreshVirtualNetworkRuntime);
+        TailcatRuntimeStatus runtimeStatus = safeRuntimeStatus();
         AgentHeartbeatResponse response = controlClient.heartbeat(
                 state.agentCredential(), new AgentHeartbeatRequest(
                         agentVersion,
@@ -470,7 +573,7 @@ public final class AgentRuntime implements AutoCloseable {
         try {
             sendHeartbeat();
         } catch (RuntimeException exception) {
-            LOGGER.warn("control-plane heartbeat failed; will retry");
+            markControlPlaneFailure("control-plane heartbeat failed", exception);
         }
     }
 
@@ -1174,6 +1277,18 @@ public final class AgentRuntime implements AutoCloseable {
         }
     }
 
+    private void runMaintenanceSafely(String operation, Runnable action) {
+        try {
+            action.run();
+        } catch (RuntimeException exception) {
+            // A failing optional component must not prevent the control-plane
+            // heartbeat from being sent. Its own runtime snapshot/log carries
+            // the detailed failure and the next maintenance cycle retries it.
+            LOGGER.warn("{} failed; will retry on the next maintenance cycle: {}",
+                    operation, exception.getMessage());
+        }
+    }
+
     private List<AgentForwardRuntime> forwardRuntimeSnapshot() {
         synchronized (serverReconcileLock) {
             return appliedForwards.values().stream()
@@ -1248,9 +1363,16 @@ public final class AgentRuntime implements AutoCloseable {
     private void refreshRuntimeState() {
         TailcatServerHandle currentHandle = serverHandle;
         if (currentHandle == null) {
+            AgentDesiredState current = desiredState;
+            if (current != null) {
+                // A failed initial Tailcat launch leaves the Agent useful for
+                // status/control purposes. Retry only the missing runtime on a
+                // normal heartbeat instead of exiting the whole process.
+                reconcileDesiredState(current, false);
+            }
             return;
         }
-        TailcatRuntimeStatus runtimeStatus = tailcatEngine.getRuntimeStatus();
+        TailcatRuntimeStatus runtimeStatus = safeRuntimeStatus();
         boolean running = runtimeStatus.state() == ProcessState.RUNNING
                 && runtimeStatus.listenAddress() != null;
         boolean addressChanged = running
@@ -1276,13 +1398,52 @@ public final class AgentRuntime implements AutoCloseable {
                 LOGGER.debug("could not report degraded Tailcat Server runtime");
             }
         }
+        if (!running && desiredState != null) {
+            reconcileDesiredState(desiredState, false);
+        }
     }
 
     private String currentServerStatus() {
+        if (!initialSyncFinished) {
+            return "STARTING";
+        }
         if (serverHandle == null) {
-            return "STOPPED";
+            return "DEGRADED";
         }
         return controlPlaneStatus;
+    }
+
+    private TailcatRuntimeStatus safeRuntimeStatus() {
+        try {
+            return tailcatEngine.getRuntimeStatus();
+        } catch (RuntimeException exception) {
+            return new TailcatRuntimeStatus(ProcessState.FAILED, null, null,
+                    safeError(exception), 0);
+        }
+    }
+
+    private void markControlPlaneFailure(String operation, Throwable exception) {
+        if (closed.get()) {
+            return;
+        }
+        if (exception instanceof AgentControlException controlException
+                && controlException.status() >= 400 && controlException.status() < 500
+                && controlException.status() != 401) {
+            // A pending/disabled device is still reaching the Control Server;
+            // do not misrepresent that as a network outage in the Desktop UI.
+            controlPlaneStatus = "PENDING";
+        } else {
+            controlPlaneStatus = "OFFLINE";
+        }
+        LOGGER.warn("{}; Agent remains running and will retry: {}",
+                operation, exception == null ? "unknown error" : exception.getMessage());
+    }
+
+    private static boolean isControlPlaneOffline(String value) {
+        return "OFFLINE".equalsIgnoreCase(value)
+                || "DISCONNECTED".equalsIgnoreCase(value)
+                || "UNREACHABLE".equalsIgnoreCase(value)
+                || "ERROR".equalsIgnoreCase(value);
     }
 
     private static String localHostname() {

@@ -41,6 +41,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -90,6 +92,10 @@ class AgentRuntimeServiceTest {
             try {
                 runtime.start("tm_enroll_m4_test", new PrintWriter(new StringWriter(), true));
 
+                assertTrue(waitFor(() -> serviceReports.stream()
+                        .anyMatch(body -> body.contains("\"status\":\"READY\"")),
+                        Duration.ofSeconds(5)),
+                        "Agent did not report a READY ServiceBridge: " + serviceReports);
                 String readyReportJson = serviceReports.stream()
                         .filter(body -> body.contains("\"status\":\"READY\""))
                         .findFirst()
@@ -118,6 +124,86 @@ class AgentRuntimeServiceTest {
         }
 
         assertTrue(serviceReports.stream().anyMatch(body -> body.contains("\"status\":\"STOPPED\"")));
+    }
+
+    @Test
+    void publishesLocalStatusBeforeSlowDesiredStateReconcile() throws Exception {
+        UUID deviceId = UUID.randomUUID();
+        CountDownLatch desiredStateRequested = new CountDownLatch(1);
+        CountDownLatch releaseDesiredState = new CountDownLatch(1);
+        HttpServer controlPlane = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        try {
+            controlPlane.createContext("/api/v1/agent/enroll", exchange -> {
+                drain(exchange);
+                send(exchange, 200, "{\"deviceId\":\"" + deviceId
+                        + "\",\"agentCredential\":\"tm_startup_test\",\"status\":\"ONLINE\"}");
+            });
+            controlPlane.createContext("/api/v1/agent/desired-state", exchange -> {
+                drain(exchange);
+                desiredStateRequested.countDown();
+                try {
+                    releaseDesiredState.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+                send(exchange, 200, "{\"deviceId\":\"" + deviceId
+                        + "\",\"revision\":0,\"allowedClientPublicKeys\":[],"
+                        + "\"services\":[],\"peers\":[],\"forwards\":[],\"derp\":{},"
+                        + "\"settings\":{},\"virtualNetworks\":[]}");
+            });
+            controlPlane.createContext("/api/v1/agent/heartbeat", exchange -> {
+                drain(exchange);
+                send(exchange, 200, "{\"deviceId\":\"" + deviceId
+                        + "\",\"status\":\"ONLINE\",\"desiredRevision\":0,\"accepted\":true}");
+            });
+            controlPlane.createContext("/api/v1/agent/ws", exchange -> send(exchange, 404, ""));
+            controlPlane.start();
+
+            Path dataDir = temporaryDirectory.resolve("startup-agent-data");
+            AgentConfig config = new AgentConfig(
+                    URI.create("http://127.0.0.1:" + controlPlane.getAddress().getPort()),
+                    temporaryDirectory.resolve("tailcat-startup.exe"),
+                    dataDir,
+                    dataDir.resolve("identity/server.private.json"),
+                    dataDir.resolve("identity/client.private.json"),
+                    true,
+                    null,
+                    Duration.ofSeconds(5),
+                    Duration.ofSeconds(5));
+            RecordingTailcatEngine engine = new RecordingTailcatEngine(new AtomicReference<>());
+            AgentRuntime runtime = new AgentRuntime(
+                    config, engine, new AgentControlClient(config, Duration.ofSeconds(5)),
+                    new AgentStateStore(dataDir), new TcpServiceBridge(), "0.1.0");
+            try {
+                long startedAt = System.nanoTime();
+                runtime.start("tm_startup_test", new PrintWriter(new StringWriter(), true));
+                long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+
+                assertTrue(elapsedMillis < 1_000,
+                        "Agent bootstrap waited for desired state: " + elapsedMillis + "ms");
+                assertTrue(desiredStateRequested.await(2, TimeUnit.SECONDS),
+                        "background desired-state request was not started");
+                assertEquals("RUNNING", runtime.localStatus().agentState());
+                assertEquals("RECONNECTING", runtime.localStatus().status());
+            } finally {
+                releaseDesiredState.countDown();
+                runtime.close();
+            }
+        } finally {
+            controlPlane.stop(0);
+        }
+    }
+
+    private static boolean waitFor(java.util.function.BooleanSupplier condition, Duration timeout)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (condition.getAsBoolean()) {
+                return true;
+            }
+            Thread.sleep(20);
+        }
+        return condition.getAsBoolean();
     }
 
     private static void installControlPlane(HttpServer server, UUID deviceId, UUID serviceId,

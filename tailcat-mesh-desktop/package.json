@@ -10,11 +10,13 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc && node scripts/copy-renderer.mjs",
+    "build-agent": "node scripts/build-agent.mjs",
     "prepare-agent": "node scripts/stage-agent.mjs",
-    "dev": "npm run build && electron .",
-    "start": "npm run build && electron .",
+    "dev": "npm run build && npm run stop-old && electron .",
+    "start": "npm run build && npm run stop-old && electron .",
+    "stop-old": "node scripts/stop-existing-electron.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
-    "dist": "npm run build && npm run prepare-agent && electron-builder --config electron-builder.yml"
+    "dist": "npm run build && npm run build-agent && npm run prepare-agent && electron-builder --config electron-builder.yml"
   },
   "dependencies": {},
   "devDependencies": {

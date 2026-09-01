@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('设备', 'devices', ~{::content})}">
+<section th:fragment="content">
+    <div class="page-head">
+        <div><p class="eyebrow">Device registry</p><h1>设备</h1><p class="page-description">审批加入申请，查看 Agent 心跳和 Tailcat 运行状态。</p></div>
+        <a class="button button-secondary" th:href="@{/admin/devices}"><span aria-hidden="true">↻</span>刷新</a>
+    </div>
+
+    <section class="card table-card">
+        <form class="filter-bar" method="get" th:action="@{/admin/devices}">
+            <label class="search-field"><span aria-hidden="true">⌕</span><input id="device-search" name="q" type="search" th:value="${query}" placeholder="搜索设备或主机名" aria-label="搜索设备或主机名"></label>
+            <input type="hidden" name="status" th:value="${statusFilter}">
+            <button class="button button-secondary search-submit" type="submit">搜索</button>
+            <nav class="filter-tabs" aria-label="设备状态筛选">
+                <a th:each="filter : ${ {'ALL','PENDING','ONLINE','OFFLINE','DISABLED'} }"
+                   th:classappend="${statusFilter == filter} ? ' is-active' : ''"
+                   th:href="@{/admin/devices(q=${query},status=${filter})}">
+                    <span th:text="${filter == 'ALL' ? '全部' : @adminWeb.deviceStatus(filter)}">全部</span>
+                    <small th:text="${statusCounts[filter]}">0</small>
+                </a>
+            </nav>
+        </form>
+
+        <div class="table-scroll" th:if="${!#lists.isEmpty(devices)}">
+            <table>
+                <thead><tr><th>设备</th><th>状态</th><th>版本</th><th>最近心跳</th><th><span class="sr-only">操作</span></th></tr></thead>
+                <tbody>
+                <tr th:each="device : ${devices}" data-device-row th:attr="data-device-search=${device.name + ' ' + device.hostname + ' ' + device.os + ' ' + device.arch + ' ' + device.id}">
+                    <td><a class="table-primary" th:href="@{/admin/devices/{id}(id=${device.id})}"><span class="avatar-icon">▣</span><span><b th:text="${device.name}">device</b><small th:text="${device.hostname + ' · ' + device.os + '/' + device.arch}">host</small></span></a></td>
+                    <td><span class="badge" th:classappend="${@adminWeb.deviceClass(device.status)}" th:text="${@adminWeb.deviceStatus(device.status)}">在线</span></td>
+                    <td class="muted-cell">Agent <span th:text="${device.agentVersion}">0.1</span><br>Tailcat <span th:text="${device.tailcatVersion}">0.3</span></td>
+                    <td><b class="small-strong" th:text="${@adminWeb.relative(device.lastSeenAt)}">刚刚</b><small class="muted-cell" th:text="${@adminWeb.date(device.lastSeenAt)}">—</small></td>
+                    <td class="action-cell"><a class="icon-link" th:href="@{/admin/devices/{id}(id=${device.id})}" aria-label="查看设备详情">→</a></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="empty-state" th:if="${#lists.isEmpty(devices)}">
+            <span class="empty-icon">▣</span>
+            <h3 th:text="${deviceCount == 0 ? '还没有注册设备' : '没有匹配的设备'}">还没有注册设备</h3>
+            <p th:text="${deviceCount == 0 ? '创建加入凭证并运行 Agent connect，设备会出现在这里。' : '尝试调整搜索关键词或状态筛选。'}">创建加入凭证并运行 Agent connect，设备会出现在这里。</p>
+        </div>
+    </section>
+
+    <section class="card detail-card" th:if="${selectedDevice != null}">
+        <div class="card-head">
+            <div><p class="eyebrow">Device detail</p><h2 th:text="${selectedDevice.name}">设备详情</h2><p th:text="${selectedDevice.hostname + ' · ' + selectedDevice.os + '/' + selectedDevice.arch}">host</p></div>
+            <a class="text-button" th:href="@{/admin/devices}">收起详情 ×</a>
+        </div>
+        <div class="detail-toolbar">
+            <span class="badge" th:classappend="${@adminWeb.deviceClass(selectedDevice.status)}" th:text="${@adminWeb.deviceStatus(selectedDevice.status)}">待审批</span>
+            <div class="inline-actions">
+                <form th:if="${selectedDevice.status.name() == 'PENDING'}" method="post" th:action="@{/admin/devices/{id}/approve(id=${selectedDevice.id})}" data-confirm="确定批准这台设备吗？"><input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"><button class="button button-primary" type="submit">✓ 批准设备</button></form>
+                <form th:if="${selectedDevice.status.name() != 'DISABLED'}" method="post" th:action="@{/admin/devices/{id}/disable(id=${selectedDevice.id})}" data-confirm="禁用后设备将无法继续使用控制面凭证，确定继续吗？"><input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"><button class="button button-danger" type="submit">× 禁用设备</button></form>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-item"><small>设备 ID</small><code th:text="${selectedDevice.id}">uuid</code><button class="copy-button" type="button" th:attr="data-copy=${selectedDevice.id}">复制</button></div>
+            <div class="detail-item"><small>Mesh Network</small><code th:text="${selectedDevice.networkId}">uuid</code></div>
+            <div class="detail-item"><small>Agent 版本</small><b th:text="${selectedDevice.agentVersion}">0.1</b></div>
+            <div class="detail-item"><small>Tailcat 版本</small><b th:text="${selectedDevice.tailcatVersion}">0.3</b></div>
+            <div class="detail-item"><small>最近心跳</small><b th:text="${@adminWeb.date(selectedDevice.lastSeenAt)}">—</b></div>
+            <div class="detail-item"><small>Desired Revision</small><b th:text="${selectedDevice.desiredRevision}">0</b></div>
+        </div>
+        <div class="detail-panels">
+            <div class="code-panel"><div class="panel-label"><span>Client public key</span><button class="copy-button" th:if="${selectedDevice.clientPublicKey != null}" type="button" th:attr="data-copy=${selectedDevice.clientPublicKey}">复制</button></div><code th:text="${selectedDevice.clientPublicKey ?: '尚未上报'}">尚未上报</code></div>
+            <div class="code-panel"><div class="panel-label"><span>Server ConnBlob hash</span></div><code th:text="${selectedDevice.serverConnBlobHash ?: '尚未上报'}">尚未上报</code></div>
+        </div>
+        <div class="sub-panel">
+            <div class="panel-label"><span>Virtual Networks</span><small th:text="${#lists.size(selectedDevice.virtualNetworks)} + ' 个网络'">0 个网络</small></div>
+            <div class="mini-list" th:if="${!#lists.isEmpty(selectedDevice.virtualNetworks)}">
+                <div class="mini-row" th:each="network : ${selectedDevice.virtualNetworks}"><span><b th:text="${network.networkName}">Network</b><small th:text="${network.cidr}">10.77.0.0/24</small></span><span class="mono accent" th:text="${network.virtualIpv4}">10.77.0.2</span></div>
+            </div>
+            <p class="muted-text" th:if="${#lists.isEmpty(selectedDevice.virtualNetworks)}">尚未加入 Virtual Network。</p>
+        </div>
+        <div class="detail-footer"><span>创建于：<b th:text="${@adminWeb.date(selectedDevice.createdAt)}">—</b></span><span>更新于：<b th:text="${@adminWeb.date(selectedDevice.updatedAt)}">—</b></span></div>
+    </section>
+</section>
+</html>

@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readdir } from "node:fs/promises";
+import { access, copyFile, mkdir, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,10 +11,6 @@ const candidates = [];
 if (explicit) {
   candidates.push(path.resolve(explicit));
 }
-candidates.push(
-  path.join(repositoryRoot, "tailcat-mesh-agent", "target", "tailcat-mesh-agent-0.1.0-SNAPSHOT.jar"),
-  path.join(desktopRoot, "resources", "agent", "tailcat-mesh-agent.jar")
-);
 
 try {
   const targetDirectory = path.join(repositoryRoot, "tailcat-mesh-agent", "target");
@@ -24,16 +20,28 @@ try {
       && entry.name.startsWith("tailcat-mesh-agent-")
       && entry.name.endsWith(".jar")
       && !entry.name.startsWith("original-"))
+    .sort((left, right) => {
+      const leftIsShaded = left.name.endsWith("-shaded.jar");
+      const rightIsShaded = right.name.endsWith("-shaded.jar");
+      if (leftIsShaded !== rightIsShaded) {
+        return leftIsShaded ? -1 : 1;
+      }
+      return right.name.localeCompare(left.name, undefined, { numeric: true });
+    })
     .map((entry) => path.join(targetDirectory, entry.name));
   candidates.push(...discovered);
 } catch {
-  // The explicit and conventional paths below produce the useful error.
+  // The explicit path and the previously staged copy remain useful fallbacks.
 }
+candidates.push(path.join(desktopRoot, "resources", "agent", "tailcat-mesh-agent.jar"));
 
 let source;
 for (const candidate of [...new Set(candidates)]) {
   try {
     await access(candidate);
+    if (!(await stat(candidate)).isFile()) {
+      continue;
+    }
     source = candidate;
     break;
   } catch {

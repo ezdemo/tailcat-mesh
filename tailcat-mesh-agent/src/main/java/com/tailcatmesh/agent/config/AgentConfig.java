@@ -19,7 +19,8 @@ public record AgentConfig(
         VirtualLanAgentConfig virtualLan,
         boolean tailcatAutoDownload,
         String tailcatVersion,
-        String deviceName
+        String deviceName,
+        NetworkProxyConfig proxy
 ) {
     public static final String DEFAULT_TAILCAT_VERSION = "0.3.0";
 
@@ -29,7 +30,7 @@ public record AgentConfig(
                        Duration peerPingInterval) {
         this(serverUrl, tailcatBinary, dataDir, serverKeyPath, clientKeyPath, fullAddress,
                 derpMapUrl, heartbeatInterval, peerPingInterval,
-                VirtualLanAgentConfig.disabled(), false, DEFAULT_TAILCAT_VERSION, null);
+                VirtualLanAgentConfig.disabled(), false, DEFAULT_TAILCAT_VERSION, null, null);
     }
 
     /** Backwards-compatible constructor for callers that provide Virtual LAN settings. */
@@ -39,7 +40,7 @@ public record AgentConfig(
                        Duration peerPingInterval, VirtualLanAgentConfig virtualLan) {
         this(serverUrl, tailcatBinary, dataDir, serverKeyPath, clientKeyPath, fullAddress,
                 derpMapUrl, heartbeatInterval, peerPingInterval, virtualLan,
-                false, DEFAULT_TAILCAT_VERSION, null);
+                false, DEFAULT_TAILCAT_VERSION, null, null);
     }
 
     public AgentConfig {

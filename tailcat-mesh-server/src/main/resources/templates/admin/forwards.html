@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('转发', 'forwards', ~{::content})}">
+<section th:fragment="content">
+    <div class="page-head">
+        <div><p class="eyebrow">Local forwards</p><h1>转发</h1><p class="page-description">把同一 Mesh 中的远端 TCP 服务映射到源设备的本地回环端口，便于从设备侧直接访问。</p></div>
+        <div class="inline-actions"><a class="button button-secondary" th:href="@{/admin/forwards}"><span aria-hidden="true">↻</span>刷新</a><a class="button button-primary" th:href="@{/admin/forwards(create=true)}">＋ 新建转发</a></div>
+    </div>
+
+    <div class="notice notice-amber"><span class="notice-icon">⇄</span><p>本地端口固定绑定在 <code>127.0.0.1</code>。运行态来自源设备 Agent；目标服务未就绪时，监听会保留并返回明确错误。</p></div>
+
+    <section class="card form-panel" id="forward-form" th:if="${forwardFormOpen}">
+        <div class="card-head"><div><p class="eyebrow">Forward configuration</p><h2 th:text="${forwardFormTitle}">新建本地转发</h2><p>源设备负责本地监听，远端服务必须属于同一 Mesh。</p></div><a class="icon-link" th:href="@{/admin/forwards}" aria-label="关闭表单">×</a></div>
+        <form class="stack-form" method="post" th:action="${forwardFormAction}">
+            <input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
+            <label><span>转发名称</span><input name="name" required maxlength="255" th:value="${forwardForm.name}" placeholder="例如办公网 NAS"></label>
+            <div class="form-grid two-columns"><label><span>源设备</span><select name="sourceDeviceId" required><option value="">选择源设备</option><option th:each="device : ${formDevices}" th:value="${device.id}" th:selected="${forwardForm.sourceDeviceId == device.id}" th:text="${device.name + ' · ' + device.hostname}">device · host</option></select><small>用户会在这台设备上访问本地地址。</small></label><label><span>远端 TCP 服务</span><select name="remoteServiceId" required><option value="">选择同一 Mesh 中的远端服务</option><option th:each="service : ${remoteServices}" th:value="${service.id}" th:selected="${forwardForm.remoteServiceId == service.id}" th:text="${service.name + ' · ' + (deviceNames[service.deviceId] ?: 'unknown') + ' · ' + service.targetHost + ':' + service.targetPort}">service · device · host:port</option></select><small>不能选择源设备自己的服务。</small></label></div>
+            <div class="form-grid two-columns"><label><span>本地绑定地址</span><input value="127.0.0.1" readonly><small>仅允许回环访问。</small></label><label><span>本地端口</span><input name="localBindPort" required min="1" max="65535" type="number" th:value="${forwardForm.localBindPort}"></label></div>
+            <label class="check-label"><input name="enabled" type="checkbox" value="true" th:checked="${forwardForm.enabled}"><span><b>启用转发</b><small>关闭后保留配置，但 Agent 会停止本地监听。</small></span></label>
+            <div class="form-actions"><a class="button button-secondary" th:href="@{/admin/forwards}">取消</a><button class="button button-primary" type="submit" th:text="${forwardFormTitle}">创建转发</button></div>
+        </form>
+    </section>
+
+    <section class="card table-card">
+        <div class="table-scroll" th:if="${!#lists.isEmpty(forwards)}">
+            <table>
+                <thead><tr><th>名称</th><th>源设备</th><th>远端服务</th><th>本地地址</th><th>状态</th><th><span class="sr-only">操作</span></th></tr></thead>
+                <tbody>
+                <tr th:each="forward : ${forwards}">
+                    <td><span class="table-primary"><span class="avatar-icon">⇄</span><span><b th:text="${forward.name}">办公网 NAS</b><small class="mono" th:text="${@adminWeb.shorten(forward.id, 8, 5)}">uuid</small></span></span></td>
+                    <td class="muted-cell" th:text="${forward.sourceDeviceName ?: (deviceNames[forward.sourceDeviceId] ?: @adminWeb.shorten(forward.sourceDeviceId))}">source</td>
+                    <td><b class="small-strong" th:text="${forward.remoteServiceName ?: 'unknown'}">service</b><small class="muted-cell" th:text="${forward.remoteDeviceName ?: '远端设备未知'}">device</small></td>
+                    <td><code th:text="${forward.localBindHost + ':' + forward.localBindPort}">127.0.0.1:18080</code></td>
+                    <td><span class="badge" th:classappend="${forward.enabled ? ' ' + @adminWeb.forwardClass(forward.status) : ' badge-muted'}" th:text="${forward.enabled ? @adminWeb.forwardStatus(forward.status) : '已禁用'}">就绪</span><small class="error-text" th:if="${forward.errorCode != null}" th:text="${forward.errorCode}">TM-ERROR</small><small class="error-text" th:if="${forward.lastError != null}" th:text="${forward.lastError}">error</small></td>
+                    <td class="action-cell"><div class="inline-actions"><a class="text-button" th:href="@{/admin/forwards(edit=${forward.id})}">编辑</a><form method="post" th:action="@{/admin/forwards/{id}/delete(id=${forward.id})}" data-confirm="删除后源设备上的本地监听会停止，确定继续吗？"><input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"><button class="text-button danger-text" type="submit">删除</button></form></div></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="empty-state" th:if="${#lists.isEmpty(forwards)}"><span class="empty-icon">⇄</span><h3>还没有本地转发</h3><p>先发布一个远端 TCP 服务，再选择源设备创建本地监听。</p><a class="button button-primary" th:href="@{/admin/forwards(create=true)}">创建第一个转发</a></div>
+    </section>
+    <p class="page-note" th:if="${!#lists.isEmpty(forwards)}">最后一次列表刷新：<span th:text="${@adminWeb.date(lastLoadedAt)}">—</span>。Agent 会在下一次 Desired State 同步后应用配置。</p>
+</section>
+</html>

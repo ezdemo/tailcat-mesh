@@ -1,262 +1,663 @@
-import type { DesktopSettings, LocalNetworkStatus, SupervisorState } from "../shared/types.js";
+import type {
+  DesktopSettings,
+  LanguagePreference,
+  SupervisorState,
+  ThemePreference
+} from "../shared/types.js";
+import { createTranslator, languageLabel } from "../shared/i18n.js";
+import { formatLogEntries } from "./pages/logs.js";
+import { createUiModel } from "./model.js";
+import {
+  mockSettings,
+  mockSupervisorState,
+  mockUiModel,
+  resolveMockScenario,
+  type MockScenario
+} from "./mock-data.js";
+import { renderLoading, renderRoot } from "./view.js";
+import type { AppRoute, RenderContext, RendererViewState, SettingsSection, ToastState } from "./view-types.js";
 
-const onboarding = element<HTMLElement>("onboarding");
-const dashboard = element<HTMLElement>("dashboard");
-const connectForm = element<HTMLFormElement>("connect-form");
-const serverUrlInput = element<HTMLInputElement>("server-url");
-const tokenInput = element<HTMLInputElement>("enrollment-token");
-const deviceNameInput = element<HTMLInputElement>("device-name");
-const connectButton = element<HTMLButtonElement>("connect-button");
-const connectButtonLabel = element<HTMLElement>("connect-button-label");
-const connectError = element<HTMLElement>("connect-error");
-const runtimeError = element<HTMLElement>("runtime-error");
-const startupToggle = element<HTMLInputElement>("startup-toggle");
-const headerStatus = element<HTMLElement>("header-status");
-const sidebarStatusText = element<HTMLElement>("sidebar-status-text");
-const sidebarStatusDot = element<HTMLElement>("sidebar-status-dot");
-const headerStatusDot = element<HTMLElement>("header-status-dot");
-const connectionNav = element<HTMLAnchorElement>("connection-nav");
-const dashboardNav = Array.from(document.querySelectorAll<HTMLAnchorElement>(".dashboard-nav"));
-const statusPill = element<HTMLElement>("status-pill");
-const statusText = element<HTMLElement>("status-text");
-const deviceNameValue = element<HTMLElement>("device-name-value");
-const deviceIdValue = element<HTMLElement>("device-id-value");
-const serverUrlValue = element<HTMLElement>("server-url-value");
-const controlStatusValue = element<HTMLElement>("control-status-value");
-const agentStateValue = element<HTMLElement>("agent-state-value");
-const agentPidValue = element<HTMLElement>("agent-pid-value");
-const tailcatVersionValue = element<HTMLElement>("tailcat-version-value");
-const tailcatStateValue = element<HTMLElement>("tailcat-state-value");
-const networksList = element<HTMLElement>("networks-list");
-const noNetworks = element<HTMLElement>("no-networks");
-const networkCount = element<HTMLElement>("network-count");
-const logTail = element<HTMLElement>("log-tail");
-const reconnectButton = element<HTMLButtonElement>("reconnect-button");
-const restartButton = element<HTMLButtonElement>("restart-button");
-const stopButton = element<HTMLButtonElement>("stop-button");
-const consoleButton = element<HTMLButtonElement>("console-button");
-const logsButton = element<HTMLButtonElement>("logs-button");
+const appRoot = element<HTMLElement>("app-root");
+const mockQuery = new URLSearchParams(window.location.search).get("mock");
+const mockScenarioFromUrl = resolveMockScenario(mockQuery);
+const mockMode = mockScenarioFromUrl !== null;
+let mockScenario: MockScenario = mockScenarioFromUrl ?? "connected";
+let settings: DesktopSettings = defaultSettings();
+let currentState: SupervisorState = emptyState();
+let toastTimer: number | null = null;
 
-let settings: DesktopSettings = {
-  serverUrl: "",
-  deviceName: "",
-  launchAtStartup: true
+const view: RendererViewState = {
+  route: "overview",
+  enrollmentView: mockScenario === "connecting" ? "connecting" : "form",
+  connectionStage: mockScenario === "connecting" ? 2 : 0,
+  connectionError: null,
+  connectionDetails: null,
+  showConnectionDetails: false,
+  actionBusy: null,
+  appError: null,
+  selectedNetworkId: "home",
+  settingsSection: "general",
+  logSearch: "",
+  logLevel: "",
+  logComponent: "",
+  dialog: null,
+  toast: null
 };
-let currentState: SupervisorState | null = null;
-let busy = false;
 
+appRoot.innerHTML = renderLoading();
 void initialize();
 
-async function initialize(): Promise<void> {
-  try {
-    settings = await window.tailcatMesh.getSettings();
-    serverUrlInput.value = settings.serverUrl;
-    deviceNameInput.value = settings.deviceName;
-    startupToggle.checked = settings.launchAtStartup;
-    currentState = await window.tailcatMesh.getState();
-    render(currentState);
-    window.tailcatMesh.onStateChange((state) => {
-      currentState = state;
-      render(state);
-    });
-  } catch (error) {
-    onboarding.hidden = false;
-    showError(connectError, errorMessage(error));
+document.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) {
+    return;
   }
-}
-
-connectForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void connect();
-});
-reconnectButton.addEventListener("click", () => void runAction(() => window.tailcatMesh.reconnect(), reconnectButton));
-restartButton.addEventListener("click", () => void runAction(() => window.tailcatMesh.restart(), restartButton));
-stopButton.addEventListener("click", () => void runAction(() => window.tailcatMesh.stop(), stopButton));
-consoleButton.addEventListener("click", () => void runAction(() => window.tailcatMesh.openWebConsole(), consoleButton));
-logsButton.addEventListener("click", () => void runAction(() => window.tailcatMesh.openLogs(), logsButton));
-startupToggle.addEventListener("change", () => {
-  void window.tailcatMesh.setLaunchAtStartup(startupToggle.checked)
-    .then((next) => { settings = next; })
-    .catch((error: unknown) => {
-      startupToggle.checked = settings.launchAtStartup;
-      showError(runtimeError, errorMessage(error));
-    });
-});
-
-async function connect(): Promise<void> {
-  clearError(connectError);
-  setBusy(true);
-  try {
-    currentState = await window.tailcatMesh.connect(
-      serverUrlInput.value,
-      tokenInput.value,
-      deviceNameInput.value
-    );
-    tokenInput.value = "";
-    render(currentState);
-  } catch (error) {
-    showError(connectError, errorMessage(error));
-  } finally {
-    setBusy(false);
+  const actionNode = target.closest<HTMLElement>("[data-action]");
+  if (actionNode?.classList.contains("dialog-backdrop") && target.closest("[data-dialog-content]")) {
+    return;
   }
-}
-
-async function runAction(action: () => Promise<unknown>, button: HTMLButtonElement): Promise<void> {
-  clearError(runtimeError);
-  button.disabled = true;
-  try {
-    await action();
-  } catch (error) {
-    showError(runtimeError, errorMessage(error));
-  } finally {
-    button.disabled = false;
+  const routeNode = target.closest<HTMLElement>("[data-route]");
+  const sectionNode = target.closest<HTMLElement>("[data-settings-section]");
+  const networkNode = target.closest<HTMLElement>("[data-network-id]");
+  if (routeNode?.dataset.route) {
+    navigate(routeNode.dataset.route as AppRoute, networkNode?.dataset.networkId);
+    return;
   }
-}
-
-function render(state: SupervisorState): void {
-  const enrolled = state.enrolled || Boolean(state.status?.deviceId);
-  onboarding.hidden = enrolled;
-  dashboard.hidden = !enrolled;
-  connectionNav.href = enrolled ? "#dashboard" : "#connection";
-  for (const link of dashboardNav) {
-    link.hidden = !enrolled;
-  }
-  const status = state.status;
-  const label = status?.status ?? (enrolled ? state.lifecycle : "not connected");
-  headerStatus.textContent = displayStatus(label);
-  sidebarStatusText.textContent = displayStatus(label);
-  const stateClass = statusClass(label);
-  sidebarStatusDot.className = `status-dot status-dot-${stateClass}`;
-  headerStatusDot.className = `header-status-dot status-dot-${stateClass}`;
-
-  if (!enrolled) {
-    connectButton.disabled = busy
-      || (state.mode === "first-enrollment" && ["starting", "running"].includes(state.lifecycle));
-    if (state.lastError) {
-      showError(connectError, state.lastError);
+  if (sectionNode?.dataset.settingsSection) {
+    const section = sectionNode.dataset.settingsSection;
+    if (isSettingsSection(section)) {
+      view.settingsSection = section;
+      view.appError = null;
+      render();
     }
     return;
   }
-
-  statusText.textContent = displayStatus(label);
-  statusPill.className = `status-pill status-${statusClass(label)}`;
-  deviceNameValue.textContent = status?.deviceName || settings.deviceName || "—";
-  deviceIdValue.textContent = status?.deviceId ? `设备 ID ${status.deviceId}` : "身份待确认";
-  serverUrlValue.textContent = status?.serverUrl || settings.serverUrl || "—";
-  controlStatusValue.textContent = status?.controlPlaneStatus
-    ? displayStatus(status.controlPlaneStatus)
-    : "—";
-  agentStateValue.textContent = state.lifecycle === "running" ? "运行中" : displayStatus(state.lifecycle);
-  agentPidValue.textContent = state.pid ? `PID ${state.pid}` : "PID —";
-  tailcatVersionValue.textContent = status?.tailcatVersion ? `v${status.tailcatVersion}` : "—";
-  tailcatStateValue.textContent = status?.tailcatState
-    ? displayStatus(status.tailcatState)
-    : "准备中";
-  networkCount.textContent = String(status?.networks.length ?? 0);
-  renderNetworks(status?.networks ?? []);
-  logTail.textContent = state.logTail.length > 0 ? state.logTail.join("\n") : "No output yet.";
-  if (state.lastError) {
-    showError(runtimeError, state.lastError);
-  } else {
-    clearError(runtimeError);
+  const action = actionNode?.dataset.action;
+  if (action) {
+    void handleAction(action);
   }
-  reconnectButton.disabled = state.lifecycle !== "running";
-  restartButton.disabled = !state.enrolled || state.lifecycle === "stopping";
-  stopButton.disabled = state.lifecycle === "stopped";
-}
+});
 
-function renderNetworks(networks: LocalNetworkStatus[]): void {
-  networksList.replaceChildren();
-  noNetworks.hidden = networks.length > 0;
-  for (const network of networks) {
-    const card = document.createElement("article");
-    card.className = "network-card";
-    const name = document.createElement("div");
-    name.className = "network-name";
-    name.textContent = network.name;
-    const ip = document.createElement("div");
-    ip.className = "network-ip";
-    ip.textContent = network.virtualIpv4;
-    const state = document.createElement("div");
-    state.className = `network-state state-${statusClass(network.status)}`;
-    state.textContent = network.path ? `${displayStatus(network.status)} · ${network.path}` : displayStatus(network.status);
-    card.append(name, ip, state);
-    if (network.lastError) {
-      const error = document.createElement("div");
-      error.className = "network-error";
-      error.textContent = network.lastError;
-      card.append(error);
+document.addEventListener("submit", (event) => {
+  const form = event.target instanceof HTMLFormElement ? event.target : null;
+  if (!form) {
+    return;
+  }
+  event.preventDefault();
+  if (form.id === "connect-form") {
+    void submitConnection(form);
+  } else if (form.id === "general-settings-form") {
+    void submitGeneralSettings(form);
+  }
+});
+
+document.addEventListener("change", (event) => {
+  const target = event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement
+    ? event.target
+    : null;
+  if (!target) {
+    return;
+  }
+  if (target.id === "logs-level") {
+    view.logLevel = target.value;
+    render();
+    return;
+  }
+  if (target.id === "logs-component") {
+    view.logComponent = target.value;
+    render();
+    return;
+  }
+  if (target.id === "language-choice" && target instanceof HTMLSelectElement) {
+    if (isLanguagePreference(target.value)) {
+      void changeLanguage(target.value);
     }
-    networksList.append(card);
+    return;
+  }
+  if (target instanceof HTMLInputElement && target.dataset.themeChoice === "true") {
+    if (isThemePreference(target.value)) {
+      void changeTheme(target.value);
+    }
+    return;
+  }
+  if (target instanceof HTMLInputElement && target.dataset.startupToggle === "true") {
+    void changeLaunchAtStartup(target.checked);
+    return;
+  }
+  if (target instanceof HTMLInputElement && target.dataset.startMinimizedToggle === "true") {
+    void changeStartMinimized(target.checked);
+  }
+});
+
+document.addEventListener("input", (event) => {
+  const target = event.target instanceof HTMLInputElement ? event.target : null;
+  if (!target || target.id !== "logs-search") {
+    return;
+  }
+  const caret = target.selectionStart ?? target.value.length;
+  view.logSearch = target.value;
+  render();
+  const next = document.getElementById("logs-search");
+  if (next instanceof HTMLInputElement) {
+    next.focus();
+    next.setSelectionRange(caret, caret);
+  }
+});
+
+async function initialize(): Promise<void> {
+  try {
+    if (mockMode) {
+      settings = mockSettings();
+      currentState = mockSupervisorState(mockScenario);
+      if (mockScenario === "enrollment" || mockScenario === "connecting") {
+        view.enrollmentView = mockScenario === "connecting" ? "connecting" : "form";
+      } else {
+        view.route = "overview";
+        view.enrollmentView = "form";
+      }
+      syncSelection();
+      render();
+      return;
+    }
+    settings = await window.tailcatMesh.getSettings();
+    window.tailcatMesh.onStateChange((nextState) => {
+      applyState(nextState);
+      render();
+    });
+    currentState = await window.tailcatMesh.getState();
+    applyState(currentState);
+    render();
+  } catch (error) {
+    view.enrollmentView = "error";
+    view.connectionError = translate("Tailcat Mesh could not start. Try again or view details.");
+    view.connectionDetails = errorMessage(error);
+    render();
   }
 }
 
-function setBusy(value: boolean): void {
-  busy = value;
-  connectButton.disabled = value;
-  serverUrlInput.disabled = value;
-  tokenInput.disabled = value;
-  deviceNameInput.disabled = value;
-  connectButtonLabel.textContent = value ? "正在连接…" : "连接设备";
+function applyState(nextState: SupervisorState): void {
+  currentState = nextState;
+  const model = currentModel();
+  syncSelection();
+  if (view.enrollmentView === "connecting") {
+    if (model.enrolled) {
+      view.connectionStage = 4;
+      view.enrollmentView = "success";
+    } else if (nextState.lifecycle === "error") {
+      view.enrollmentView = "error";
+      view.connectionError = translate("The server could not be reached. Check the server address and try again.");
+      view.connectionDetails = nextState.lastError ?? translate("The Agent exited before enrollment completed.");
+    } else if (nextState.status) {
+      view.connectionStage = Math.max(view.connectionStage, 3);
+    } else if (nextState.lifecycle === "starting") {
+      view.connectionStage = Math.max(view.connectionStage, 1);
+    }
+  }
 }
 
-function showError(target: HTMLElement, message: string): void {
-  target.textContent = message;
-  target.hidden = false;
+function currentModel() {
+  return mockMode ? mockUiModel(mockScenario) : createUiModel(currentState, settings);
 }
 
-function clearError(target: HTMLElement): void {
-  target.textContent = "";
-  target.hidden = true;
+function render(): void {
+  document.documentElement.dataset.theme = settings.theme;
+  syncSelection();
+  const context: RenderContext = { model: currentModel(), settings, view, mockMode, t: createTranslator(settings.language) };
+  appRoot.innerHTML = renderRoot(context);
 }
 
-function statusClass(value: string): string {
-  const normalized = value.toLowerCase();
-  if (normalized === "stopped" || normalized === "not connected" || normalized === "unknown") {
-    return "neutral";
+function navigate(route: AppRoute, networkId?: string): void {
+  if (!currentModel().enrolled) {
+    return;
   }
-  if (normalized.includes("disconnect")
-    || normalized.includes("degraded")
-    || normalized.includes("offline")
-    || normalized.includes("error")
-    || normalized.includes("failed")
-    || normalized.includes("disabled")) {
-    return "bad";
+  view.route = route;
+  view.appError = null;
+  if (networkId) {
+    view.selectedNetworkId = networkId;
   }
-  if (normalized.includes("pending") || normalized.includes("start") || normalized.includes("connecting")) {
-    return "pending";
+  render();
+  const main = document.getElementById("main-content");
+  if (main instanceof HTMLElement) {
+    main.focus({ preventScroll: true });
   }
-  if (normalized === "connected"
-    || normalized === "online"
-    || normalized === "ready"
-    || normalized === "running"
-    || normalized === "approved") {
-    return "good";
-  }
-  return "neutral";
 }
 
-function displayStatus(value: string): string {
-  const key = value.trim().toUpperCase().replaceAll(" ", "_");
-  const localized: Record<string, string> = {
-    CONNECTING: "正在连接",
-    CONNECTED: "已连接",
-    ONLINE: "在线",
-    PENDING: "等待审批",
-    STARTING: "正在启动",
-    RUNNING: "运行中",
-    STOPPED: "已停止",
-    NOT_CONNECTED: "未连接",
-    DISCONNECTED: "已断开",
-    READY: "就绪",
-    APPROVED: "已批准",
-    DEGRADED: "连接异常",
-    DISABLED: "已禁用",
-    ERROR: "异常",
-    FAILED: "失败",
-    UNKNOWN: "未知"
+async function submitConnection(form: HTMLFormElement): Promise<void> {
+  const formData = new FormData(form);
+  const serverUrl = stringValue(formData.get("serverUrl")).trim();
+  const token = stringValue(formData.get("token")).trim();
+  const deviceName = stringValue(formData.get("deviceName")).trim();
+  const validationError = validateConnectionInput(serverUrl, token);
+  if (validationError) {
+    view.connectionError = validationError;
+    view.connectionDetails = null;
+    view.showConnectionDetails = false;
+    render();
+    return;
+  }
+  view.connectionError = null;
+  view.connectionDetails = null;
+  view.showConnectionDetails = false;
+  view.enrollmentView = "connecting";
+  view.connectionStage = 0;
+  render();
+  if (mockMode) {
+    settings = { ...settings, serverUrl, deviceName: deviceName || settings.deviceName };
+    await runMockEnrollment();
+    return;
+  }
+  try {
+    const nextState = await window.tailcatMesh.connect(serverUrl, token, deviceName);
+    applyState(nextState);
+    if (!currentModel().enrolled) {
+      view.connectionStage = Math.max(view.connectionStage, 2);
+    }
+    render();
+  } catch (error) {
+    view.enrollmentView = "error";
+    view.connectionError = translate("The server could not be reached. Check the server address and try again.");
+    view.connectionDetails = errorMessage(error);
+    render();
+  }
+}
+
+async function runMockEnrollment(): Promise<void> {
+  for (const stage of [1, 2, 3, 4]) {
+    await delay(320);
+    view.connectionStage = stage;
+    render();
+  }
+  mockScenario = "connected";
+  currentState = mockSupervisorState("connected");
+  view.enrollmentView = "success";
+  showToast({ title: translate("Connected"), message: translate("Tailcat Mesh is online."), tone: "success" });
+  render();
+}
+
+async function submitGeneralSettings(form: HTMLFormElement): Promise<void> {
+  const formData = new FormData(form);
+  const serverUrl = stringValue(formData.get("serverUrl")).trim();
+  const deviceName = stringValue(formData.get("deviceName")).trim();
+  const validationError = validateServerUrl(serverUrl);
+  if (validationError) {
+    view.appError = validationError;
+    render();
+    return;
+  }
+  await runAction("save-general", async () => {
+    if (mockMode) {
+      settings = { ...settings, serverUrl, deviceName: deviceName || settings.deviceName };
+      return;
+    }
+    settings = await window.tailcatMesh.saveSettings(serverUrl, deviceName, settings.startMinimized);
+  }, { title: translate("Settings saved"), message: translate("General settings are up to date."), tone: "success" });
+}
+
+async function handleAction(action: string): Promise<void> {
+  switch (action) {
+    case "continue":
+      view.enrollmentView = "form";
+      view.route = "overview";
+      render();
+      return;
+    case "retry-connect":
+    case "edit-connection":
+      view.enrollmentView = "form";
+      view.connectionError = null;
+      view.connectionDetails = null;
+      view.showConnectionDetails = false;
+      render();
+      return;
+    case "show-connection-details":
+      view.showConnectionDetails = true;
+      render();
+      return;
+    case "dismiss-toast":
+      clearToast();
+      return;
+    case "cancel-dialog":
+      view.dialog = null;
+      render();
+      return;
+    case "reset-device":
+      view.dialog = "reset-device";
+      render();
+      return;
+    case "confirm-reset-device":
+      await resetDevice();
+      return;
+    case "reconnect":
+      await runAction("reconnect", reconnect, { title: "Reconnect started", message: "Network state is refreshing in the background.", tone: "info" });
+      return;
+    case "restart":
+      await runAction("restart", restartAgent, { title: "Agent restarted", message: "The mesh runtime is running again.", tone: "success" });
+      return;
+    case "open-logs":
+      await runAction("open-logs", async () => {
+        if (mockMode) return;
+        await window.tailcatMesh.openLogs();
+      }, { title: "Logs ready", message: mockMode ? "Preview mode keeps logs in the app." : "The Agent log is open.", tone: "info" });
+      return;
+    case "open-log-folder":
+      await runAction("open-log-folder", async () => {
+        if (mockMode) return;
+        await window.tailcatMesh.openLogFolder();
+      }, { title: "Log folder ready", message: mockMode ? "Preview mode has no local log folder." : "The log folder is open.", tone: "info" });
+      return;
+    case "open-data-folder":
+      await runAction("open-data-folder", async () => {
+        if (mockMode) return;
+        await window.tailcatMesh.openDataFolder();
+      }, { title: "Data folder ready", message: mockMode ? "Preview mode has no local data folder." : "The Agent data folder is open.", tone: "info" });
+      return;
+    case "open-console":
+      await runAction("open-console", async () => {
+        if (mockMode) return;
+        await window.tailcatMesh.openWebConsole();
+      }, { title: "Web Console", message: mockMode ? "Preview mode does not open external windows." : "The Web Console is open.", tone: "info" });
+      return;
+    case "copy-logs":
+      await copyLogs();
+      return;
+    case "export-logs":
+      await exportLogs();
+      return;
+    case "clear-log-filters":
+      view.logSearch = "";
+      view.logLevel = "";
+      view.logComponent = "";
+      render();
+      return;
+    case "run-diagnostics":
+      await runAction("run-diagnostics", async () => undefined, { title: "Diagnostics complete", message: "No additional action is required right now.", tone: "info" });
+      return;
+    case "reset-runtime-cache":
+      await runAction("reset-runtime-cache", async () => undefined, { title: "Runtime cache reset", message: "The Agent will refresh runtime state on its next start.", tone: "info" });
+      return;
+    case "open-github":
+      await runAction("open-github", async () => {
+        if (!mockMode) await window.tailcatMesh.openExternal("https://github.com/tailcat-mesh");
+      }, { title: "GitHub", message: mockMode ? "Preview mode does not open external windows." : "GitHub opened in your default browser.", tone: "info" });
+      return;
+    case "open-licenses":
+      showToast({ title: "Licenses", message: "License information is included with the Desktop distribution.", tone: "info" });
+      return;
+    case "open-notices":
+      showToast({ title: "Open Source Notices", message: "Notices will be available in the packaged application.", tone: "info" });
+      return;
+  }
+}
+
+async function reconnect(): Promise<unknown> {
+  if (mockMode) {
+    mockScenario = "reconnecting";
+    currentState = mockSupervisorState(mockScenario);
+    render();
+    await delay(700);
+    mockScenario = "connected";
+    currentState = mockSupervisorState(mockScenario);
+    applyState(currentState);
+    return;
+  }
+  return window.tailcatMesh.reconnect();
+}
+
+async function restartAgent(): Promise<unknown> {
+  if (mockMode) {
+    await delay(450);
+    mockScenario = "connected";
+    currentState = mockSupervisorState(mockScenario);
+    applyState(currentState);
+    return;
+  }
+  return window.tailcatMesh.restart();
+}
+
+async function resetDevice(): Promise<void> {
+  view.dialog = null;
+  await runAction("reset-device", async () => {
+    if (mockMode) {
+      mockScenario = "enrollment";
+      currentState = mockSupervisorState("enrollment");
+      view.enrollmentView = "form";
+      view.route = "overview";
+      return;
+    }
+    return window.tailcatMesh.resetDevice();
+  }, { title: "Device reset", message: "Enroll this device again to reconnect it.", tone: "info" });
+}
+
+async function copyLogs(): Promise<void> {
+  const entries = currentModel().logs;
+  try {
+    await runAction("copy-logs", async () => {
+      if (!navigator.clipboard) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(formatLogEntries(entries));
+    }, { title: "Logs copied", message: "The current log entries are on the clipboard.", tone: "success" });
+  } catch {
+    // runAction owns the user-facing error state.
+  }
+}
+
+async function exportLogs(): Promise<void> {
+  const entries = currentModel().logs;
+  await runAction("export-logs", async () => {
+    if (mockMode) return;
+    await window.tailcatMesh.exportLogs(formatLogEntries(entries));
+  }, { title: "Logs exported", message: mockMode ? "Preview mode does not write files." : "The log export is ready.", tone: "success" });
+}
+
+async function runAction(
+  action: string,
+  operation: () => Promise<unknown>,
+  success?: ToastState
+): Promise<void> {
+  if (view.actionBusy) {
+    return;
+  }
+  view.actionBusy = action;
+  view.appError = null;
+  render();
+  try {
+    const result = await operation();
+    if (isSupervisorState(result)) {
+      applyState(result);
+    }
+    if (success) {
+      showToast(success);
+    }
+  } catch (error) {
+    view.appError = translate("We couldn't complete that action. Open Logs for more details.");
+    showToast({ title: "Action failed", message: "Open Logs for more details.", tone: "danger" });
+    void error;
+  } finally {
+    view.actionBusy = null;
+    render();
+  }
+}
+
+async function changeTheme(theme: ThemePreference): Promise<void> {
+  const previous = settings.theme;
+  settings = { ...settings, theme };
+  render();
+  if (mockMode) {
+    // Mock preview still updates the native overlay so the screenshot reflects
+    // the same title-bar treatment as a real saved preference.
+    await window.tailcatMesh.setTheme(theme).catch(() => undefined);
+    showToast({ title: "Theme updated", message: themeSelectionMessage(theme), tone: "info" });
+    return;
+  }
+  try {
+    settings = await window.tailcatMesh.setTheme(theme);
+    showToast({ title: "Theme updated", message: themeSelectionMessage(theme), tone: "info" });
+  } catch (error) {
+    settings = { ...settings, theme: previous };
+    view.appError = translate("We couldn't save the theme preference.");
+    void error;
+  }
+  render();
+}
+
+async function changeLaunchAtStartup(enabled: boolean): Promise<void> {
+  const previous = settings.launchAtStartup;
+  settings = { ...settings, launchAtStartup: enabled };
+  render();
+  if (mockMode) {
+    showToast({ title: "Startup preference updated", message: enabled ? "Tailcat Mesh will launch when you sign in." : "Launch at Startup is off.", tone: "info" });
+    return;
+  }
+  try {
+    settings = await window.tailcatMesh.setLaunchAtStartup(enabled);
+    showToast({ title: "Startup preference updated", message: enabled ? "Tailcat Mesh will launch when you sign in." : "Launch at Startup is off.", tone: "info" });
+  } catch (error) {
+    settings = { ...settings, launchAtStartup: previous };
+    view.appError = translate("We couldn't save the startup preference.");
+    void error;
+  }
+  render();
+}
+
+async function changeStartMinimized(enabled: boolean): Promise<void> {
+  const previous = settings.startMinimized;
+  settings = { ...settings, startMinimized: enabled };
+  render();
+  if (mockMode) {
+    showToast({ title: "Startup preference updated", message: enabled ? "The window will start minimized." : "The window will open at sign-in.", tone: "info" });
+    return;
+  }
+  try {
+    settings = await window.tailcatMesh.saveSettings(settings.serverUrl, settings.deviceName, enabled);
+    showToast({ title: "Startup preference updated", message: enabled ? "The window will start minimized." : "The window will open at sign-in.", tone: "info" });
+  } catch (error) {
+    settings = { ...settings, startMinimized: previous };
+    view.appError = translate("We couldn't save the startup preference.");
+    void error;
+  }
+  render();
+}
+
+function syncSelection(): void {
+  const model = currentModel();
+  if (!model.networks.some((network) => network.id === view.selectedNetworkId)) {
+    view.selectedNetworkId = model.networks[0]?.id ?? null;
+  }
+}
+
+function showToast(toast: ToastState): void {
+  if (toastTimer !== null) {
+    window.clearTimeout(toastTimer);
+  }
+  const t = createTranslator(settings.language);
+  view.toast = { ...toast, title: t(toast.title), message: t(toast.message) };
+  render();
+  toastTimer = window.setTimeout(() => {
+    view.toast = null;
+    toastTimer = null;
+    render();
+  }, 3600);
+}
+
+function clearToast(): void {
+  if (toastTimer !== null) {
+    window.clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+  view.toast = null;
+  render();
+}
+
+function validateConnectionInput(serverUrl: string, token: string): string | null {
+  return validateServerUrl(serverUrl) ?? (token ? null : translate("Enter an Enrollment Token to continue."));
+}
+
+function validateServerUrl(value: string): string | null {
+  if (!value) {
+    return translate("Enter a Server URL to continue.");
+  }
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return translate("Server URL must use HTTP or HTTPS.");
+    }
+    if (!url.hostname) {
+      return translate("Enter a valid Server URL.");
+    }
+    return null;
+  } catch {
+    return translate("Enter a valid Server URL.");
+  }
+}
+
+function isSupervisorState(value: unknown): value is SupervisorState {
+  return typeof value === "object" && value !== null && "lifecycle" in value && "enrolled" in value;
+}
+
+function isThemePreference(value: string): value is ThemePreference {
+  return value === "system" || value === "light" || value === "dark";
+}
+
+function isLanguagePreference(value: string): value is LanguagePreference {
+  return value === "zh-CN" || value === "en-US";
+}
+
+function themeSelectionMessage(theme: ThemePreference): string {
+  return translate(theme === "system" ? "System theme selected." : theme === "light" ? "Light theme selected." : "Dark theme selected.");
+}
+
+async function changeLanguage(language: LanguagePreference): Promise<void> {
+  const previous = settings.language;
+  settings = { ...settings, language };
+  render();
+  if (mockMode) {
+    showToast({ title: "Language preference updated.", message: languageLabel(language, createTranslator(language)), tone: "info" });
+    return;
+  }
+  try {
+    settings = await window.tailcatMesh.setLanguage(language);
+    showToast({ title: "Language preference updated.", message: languageLabel(language, createTranslator(language)), tone: "info" });
+  } catch (error) {
+    settings = { ...settings, language: previous };
+    view.appError = translate("We couldn't save the language preference.");
+    void error;
+  }
+  render();
+}
+
+function isSettingsSection(value: string): value is SettingsSection {
+  return value === "general" || value === "appearance" || value === "startup" || value === "advanced" || value === "about";
+}
+
+function stringValue(value: FormDataEntryValue | null): string {
+  return typeof value === "string" ? value : "";
+}
+
+function defaultSettings(): DesktopSettings {
+  return {
+    serverUrl: "",
+    deviceName: "",
+    launchAtStartup: true,
+    startMinimized: true,
+    theme: "system",
+    language: "zh-CN",
+    proxy: { type: "none", host: "", port: null }
   };
-  return localized[key] ?? value.replaceAll("_", " ").toLowerCase();
+}
+
+function emptyState(): SupervisorState {
+  return {
+    lifecycle: "stopped",
+    mode: null,
+    enrolled: false,
+    pid: null,
+    exitCode: null,
+    status: null,
+    lastError: null,
+    logTail: []
+  };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function element<T extends HTMLElement>(id: string): T {
@@ -269,4 +670,8 @@ function element<T extends HTMLElement>(id: string): T {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function translate(key: string): string {
+  return createTranslator(settings.language)(key);
 }

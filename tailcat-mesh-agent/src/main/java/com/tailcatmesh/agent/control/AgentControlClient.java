@@ -36,9 +36,12 @@ public final class AgentControlClient {
     public AgentControlClient(AgentConfig config, Duration requestTimeout) {
         this.config = Objects.requireNonNull(config, "config");
         this.requestTimeout = positive(requestTimeout);
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(this.requestTimeout)
-                .build();
+        HttpClient.Builder builder = HttpClient.newBuilder()
+                .connectTimeout(this.requestTimeout);
+        if (config.proxy() != null) {
+            builder.proxy(config.proxy().proxySelector());
+        }
+        this.httpClient = builder.build();
     }
 
     public AgentEnrollmentResponse enroll(String enrollmentToken, String hostname, String os, String arch,

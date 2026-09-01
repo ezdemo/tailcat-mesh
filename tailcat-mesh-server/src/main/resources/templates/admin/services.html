@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('服务', 'services', ~{::content})}">
+<section th:fragment="content">
+    <div class="page-head">
+        <div><p class="eyebrow">Published services</p><h1>服务</h1><p class="page-description">把设备所在网络里的 TCP 服务发布到 Mesh。Agent 会在本机创建 loopback bridge，并由 Tailcat 对外提供访问。</p></div>
+        <div class="inline-actions"><a class="button button-secondary" th:href="@{/admin/services}"><span aria-hidden="true">↻</span>刷新</a><a class="button button-primary" th:href="@{/admin/services(create=true)}">＋ 发布服务</a></div>
+    </div>
+
+    <div class="notice notice-indigo"><span class="notice-icon">▤</span><p>当前共有 <b th:text="${#lists.size(services)}">0</b> 个服务。运行态来自 Agent 上报，配置变更通常会在约 2 秒内同步。</p></div>
+
+    <section class="card form-panel" id="service-form" th:if="${serviceFormOpen}">
+        <div class="card-head"><div><p class="eyebrow">Service configuration</p><h2 th:text="${serviceFormTitle}">发布 TCP 服务</h2><p>目标地址由该设备所在网络访问；Agent bridge 只监听本机 loopback。</p></div><a class="icon-link" th:href="@{/admin/services}" aria-label="关闭表单">×</a></div>
+        <form class="stack-form" method="post" th:action="${serviceFormAction}">
+            <input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
+            <div class="form-grid two-columns"><label><span>服务名称</span><input name="name" required maxlength="255" th:value="${serviceForm.name}" placeholder="例如 NAS Web"></label><label><span>发布设备</span><select name="deviceId" required><option value="">选择设备</option><option th:each="device : ${devices}" th:if="${device.status.name() != 'DISABLED' or serviceForm.deviceId == device.id}" th:value="${device.id}" th:selected="${serviceForm.deviceId == device.id}" th:text="${device.name + ' · ' + device.hostname}">device · host</option></select><small>禁用设备不能发布新服务。</small></label></div>
+            <div class="form-grid two-columns"><label><span>目标主机</span><input name="targetHost" required maxlength="255" th:value="${serviceForm.targetHost}" placeholder="127.0.0.1 或 192.168.1.20"></label><label><span>目标端口</span><input name="targetPort" required min="1" max="65535" type="number" th:value="${serviceForm.targetPort}"></label></div>
+            <label class="check-label"><input name="enabled" type="checkbox" value="true" th:checked="${serviceForm.enabled}"><span><b>启用服务</b><small>关闭后 Agent 会停止 bridge，但保留配置。</small></span></label>
+            <div class="form-actions"><a class="button button-secondary" th:href="@{/admin/services}">取消</a><button class="button button-primary" type="submit" th:text="${serviceFormTitle}">发布服务</button></div>
+        </form>
+    </section>
+
+    <section class="card table-card">
+        <div class="table-scroll" th:if="${!#lists.isEmpty(services)}">
+            <table>
+                <thead><tr><th>名称</th><th>设备</th><th>目标</th><th>Bridge Port</th><th>状态</th><th><span class="sr-only">操作</span></th></tr></thead>
+                <tbody>
+                <tr th:each="service : ${services}">
+                    <td><span class="table-primary"><span class="avatar-icon">▤</span><span><b th:text="${service.name}">NAS Web</b><small class="mono" th:text="${@adminWeb.shorten(service.id, 8, 5)}">uuid</small></span></span></td>
+                    <td class="muted-cell" th:text="${deviceNames[service.deviceId] ?: @adminWeb.shorten(service.deviceId)}">device</td>
+                    <td><code th:text="${service.targetHost + ':' + service.targetPort}">127.0.0.1:80</code><small class="muted-cell" th:text="${service.protocol}">TCP</small></td>
+                    <td class="muted-cell"><code th:if="${service.bridgePort != null}" th:text="${'127.0.0.1:' + service.bridgePort}">127.0.0.1:10000</code><span th:unless="${service.bridgePort != null}">—</span></td>
+                    <td><span class="badge" th:classappend="${service.enabled ? ' ' + @adminWeb.serviceClass(service.status) : ' badge-muted'}" th:text="${service.enabled ? @adminWeb.serviceStatus(service.status) : '已禁用'}">就绪</span><small class="error-text" th:if="${service.lastError != null}" th:text="${service.lastError}">error</small></td>
+                    <td class="action-cell"><div class="inline-actions"><a class="text-button" th:href="@{/admin/services(edit=${service.id})}">编辑</a><form method="post" th:action="@{/admin/services/{id}/delete(id=${service.id})}" data-confirm="删除后 Agent 会停止对应 bridge，确定继续吗？"><input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"><button class="text-button danger-text" type="submit">删除</button></form></div></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="empty-state" th:if="${#lists.isEmpty(services)}"><span class="empty-icon">▤</span><h3>还没有发布服务</h3><p>选择一台已注册设备，填写它能访问的 TCP 目标地址。</p><a class="button button-primary" th:href="@{/admin/services(create=true)}">发布第一个服务</a></div>
+    </section>
+    <p class="page-note" th:if="${!#lists.isEmpty(services)}">最后一次列表刷新：<span th:text="${@adminWeb.date(lastLoadedAt)}">—</span>。Bridge 端口由 Agent 动态分配，只绑定在 127.0.0.1。</p>
+</section>
+</html>

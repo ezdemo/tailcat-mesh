@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org"
+      th:fragment="shell(title, active, content)">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Tailcat Mesh 管理控制台">
+    <title th:text="${title} + ' · Tailcat Mesh'">Tailcat Mesh</title>
+    <link rel="stylesheet" th:href="@{/css/admin.css}">
+</head>
+<body th:attr="data-auto-refresh=${autoRefresh}">
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
+<aside class="sidebar" id="sidebar">
+    <div class="brand">
+        <a class="brand-link" th:href="@{/admin/overview}" aria-label="返回控制面总览">
+            <span class="brand-mark" aria-hidden="true">⌁</span>
+            <span>
+                <strong>Tailcat Mesh</strong>
+                <small>Control Plane</small>
+            </span>
+        </a>
+        <button class="icon-button sidebar-close" type="button" data-sidebar-close aria-label="关闭菜单">×</button>
+    </div>
+
+    <div class="sidebar-body">
+        <p class="sidebar-label">Workspace</p>
+        <nav class="nav-list" aria-label="主导航">
+            <a class="nav-item" th:classappend="${active == 'overview'} ? ' is-active' : ''"
+               th:href="@{/admin/overview}">
+                <span class="nav-icon" aria-hidden="true">⌂</span><span><b>总览</b><small>控制面状态</small></span>
+            </a>
+            <a class="nav-item" th:classappend="${active == 'devices'} ? ' is-active' : ''"
+               th:href="@{/admin/devices}">
+                <span class="nav-icon" aria-hidden="true">▣</span><span><b>设备</b><small>审批与状态</small></span>
+            </a>
+            <a class="nav-item" th:classappend="${active == 'networks'} ? ' is-active' : ''"
+               th:href="@{/admin/networks}">
+                <span class="nav-icon" aria-hidden="true">◈</span><span><b>网络</b><small>Virtual LAN</small></span>
+            </a>
+            <a class="nav-item" th:classappend="${active == 'services'} ? ' is-active' : ''"
+               th:href="@{/admin/services}">
+                <span class="nav-icon" aria-hidden="true">▤</span><span><b>服务</b><small>发布 TCP 服务</small></span>
+            </a>
+            <a class="nav-item" th:classappend="${active == 'forwards'} ? ' is-active' : ''"
+               th:href="@{/admin/forwards}">
+                <span class="nav-icon" aria-hidden="true">⇄</span><span><b>转发</b><small>本地访问远端服务</small></span>
+            </a>
+            <a class="nav-item" th:classappend="${active == 'connections'} ? ' is-active' : ''"
+               th:href="@{/admin/connections}">
+                <span class="nav-icon" aria-hidden="true">⌁</span><span><b>连接</b><small>Direct / DERP 路径</small></span>
+            </a>
+            <a class="nav-item" th:classappend="${active == 'tokens'} ? ' is-active' : ''"
+               th:href="@{/admin/tokens}">
+                <span class="nav-icon" aria-hidden="true">⚿</span><span><b>加入凭证</b><small>Enrollment Token</small></span>
+            </a>
+        </nav>
+    </div>
+
+    <div class="sidebar-footer">
+        <div class="connection-card">
+            <span class="status-dot"></span>
+            <div><b>控制面已连接</b><small>Server-side rendered UI</small></div>
+        </div>
+        <form method="post" th:action="@{/logout}">
+            <input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
+            <button class="logout-button" type="submit"><span aria-hidden="true">↪</span>退出登录</button>
+        </form>
+    </div>
+</aside>
+
+<div class="app-shell">
+    <header class="topbar">
+        <button class="icon-button menu-toggle" type="button" data-sidebar-open aria-label="打开菜单">☰</button>
+        <div class="breadcrumb"><span>管理员控制台</span><i>/</i><strong th:text="${currentUser}">admin</strong></div>
+        <div class="topbar-state"><span class="status-dot"></span><span>本地控制面</span></div>
+    </header>
+
+    <main class="main-content">
+        <div class="flash-stack" th:if="${success != null or error != null}" aria-live="polite">
+            <div class="flash flash-success" th:if="${success != null}" th:text="${success}">操作成功</div>
+            <div class="flash flash-error" th:if="${error != null}" th:text="${error}">操作失败</div>
+        </div>
+        <div th:replace="${content}"></div>
+    </main>
+</div>
+
+<script th:src="@{/webjars/jquery/3.7.1/jquery.min.js}"></script>
+<script th:src="@{/js/admin.js}"></script>
+</body>
+</html>

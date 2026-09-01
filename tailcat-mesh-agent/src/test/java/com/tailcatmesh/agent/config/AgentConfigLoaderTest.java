@@ -11,6 +11,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,8 +52,31 @@ class AgentConfigLoaderTest {
         assertEquals(40, config.peerPingInterval().toSeconds());
         assertFalse(config.tailcatAutoDownload());
         assertEquals("0.3.0", config.tailcatVersion());
+        assertNull(config.proxy());
         assertEquals(URI.create("wss://mesh.example.test/base/api/v1/agent/ws"),
                 config.websocketEndpoint());
+    }
+
+    @Test
+    void loadsOptionalHttpProxyConfiguration() throws Exception {
+        Path configPath = temporaryDirectory.resolve("proxy.yml");
+        Files.writeString(configPath, """
+                server:
+                  url: https://mesh.example.test
+                tailcat:
+                  binary: tailcat.exe
+                proxy:
+                  type: http
+                  host: 127.0.0.1
+                  port: 7890
+                """);
+
+        AgentConfig config = new AgentConfigLoader().load(configPath, null);
+
+        assertEquals(NetworkProxyConfig.Type.HTTP, config.proxy().type());
+        assertEquals("127.0.0.1", config.proxy().host());
+        assertEquals(7890, config.proxy().port());
+        assertEquals("http://127.0.0.1:7890", config.proxy().endpoint());
     }
 
     @Test

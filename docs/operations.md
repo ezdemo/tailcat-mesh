@@ -108,19 +108,12 @@ The default allows all browser origins, methods, and request headers for the
 Web/API surface. For production, set `WEB_ALLOWED_ORIGINS` to the exact
 frontend origin, for example `https://admin.example.com`, to restrict it.
 
-## Admin Web frontend
+## Admin Web UI
 
-After starting the Server, run the independent frontend from the repository
-root:
-
-```powershell
-cd .\tailcat-mesh-web
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`. Leave the control-plane address blank to use the
-Vite proxy to `http://localhost:8080`.
+The administrator UI is served directly by `tailcat-mesh-server` using
+Thymeleaf and a local jQuery WebJar. No independent Node/Vite process is
+required. After starting the Server, open `http://localhost:8080/login` and
+sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
 
 ## Verification
 

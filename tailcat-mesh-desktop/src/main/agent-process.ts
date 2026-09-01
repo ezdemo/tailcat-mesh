@@ -57,6 +57,7 @@ export function spawnAgent(options: AgentLaunchOptions): ChildProcess {
     {
       cwd: options.paths.resourceRoot,
       windowsHide: true,
+      detached: true,
       shell: false,
       stdio: ["ignore", "pipe", "pipe"]
     }

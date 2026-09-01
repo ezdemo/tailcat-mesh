@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -99,8 +100,12 @@ class AgentLocalStatusServerTest {
                     request(base.resolve("/local/reconnect"), token).POST(
                             HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofString());
-            assertEquals(200, reconnect.statusCode());
+            assertEquals(202, reconnect.statusCode());
             assertTrue(objectMapper.readTree(reconnect.body()).path("accepted").asBoolean());
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (reconnectCount.get() == 0 && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
             assertEquals(1, reconnectCount.get());
         }
 

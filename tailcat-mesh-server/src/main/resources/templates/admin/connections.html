@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('连接', 'connections', ~{::content})}">
+<section th:fragment="content">
+    <div class="page-head">
+        <div><p class="eyebrow">Peer connectivity</p><h1>连接</h1><p class="page-description">查看每台 Agent 到同一 Mesh 中远端 Peer 的可达性。DERP 是正常的中继路径，不代表连接不可用。</p></div>
+        <a class="button button-secondary" th:href="@{/admin/connections}"><span aria-hidden="true">↻</span>刷新</a>
+    </div>
+
+    <section class="summary-grid">
+        <article class="summary-card"><span class="stat-icon tone-green">⌁</span><div><small>在线 Peer</small><b th:text="${connectionSummary.online}">0</b></div></article>
+        <article class="summary-card"><span class="stat-icon tone-indigo">↗</span><div><small>Direct 路径</small><b th:text="${connectionSummary.direct}">0</b></div></article>
+        <article class="summary-card"><span class="stat-icon tone-sky">⇄</span><div><small>DERP 路径</small><b th:text="${connectionSummary.derp}">0</b></div></article>
+        <article class="summary-card"><span class="stat-icon tone-amber">!</span><div><small>需要关注</small><b th:text="${connectionSummary.unhealthy}">0</b></div></article>
+    </section>
+
+    <section class="card table-card">
+        <div class="table-scroll" th:if="${!#lists.isEmpty(connections)}">
+            <table>
+                <thead><tr><th>连接</th><th>状态</th><th>路径</th><th>延迟</th><th>最近检查</th></tr></thead>
+                <tbody>
+                <tr th:each="connection : ${connections}">
+                    <td><span class="table-primary"><span class="avatar-icon">⌁</span><span><b th:text="${connection.sourceDeviceName + ' → ' + connection.peerDeviceName}">a → b</b><small class="mono" th:text="${@adminWeb.shorten(connection.sourceDeviceId, 8, 5) + ' → ' + @adminWeb.shorten(connection.peerDeviceId, 8, 5)}">uuid → uuid</small></span></span></td>
+                    <td><span class="badge" th:classappend="${@adminWeb.connectionClass(connection.status)}" th:text="${@adminWeb.connectionStatus(connection.status)}">在线</span><small class="error-text" th:if="${connection.lastError != null}" th:text="${connection.lastError}">error</small></td>
+                    <td><b th:classappend="${@adminWeb.pathClass(connection.pathType)}" th:text="${@adminWeb.pathLabel(connection.pathType, connection.derpRegion)}">Direct</b><small class="muted-cell" th:if="${connection.directEndpoint != null}" th:text="${connection.directEndpoint}">endpoint</small></td>
+                    <td class="muted-cell" th:text="${@adminWeb.latency(connection.latencyMs)}">—</td>
+                    <td><b class="small-strong" th:text="${@adminWeb.relative(connection.lastCheckAt)}">刚刚</b><small class="muted-cell" th:text="${@adminWeb.date(connection.lastCheckAt)}">—</small></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="empty-state" th:if="${#lists.isEmpty(connections)}"><span class="empty-icon">⌁</span><h3>还没有 Peer 路径状态</h3><p>批准同一 Mesh 中的两台设备，并让 Agent 完成首次 Peer 检查后，连接会显示在这里。</p></div>
+    </section>
+    <p class="page-note" th:if="${!#lists.isEmpty(connections)}">最后一次刷新：<span th:text="${@adminWeb.date(lastLoadedAt)}">—</span>。本页每 30 秒自动刷新，Agent 默认每 30 秒检查一次 Peer 路径。</p>
+</section>
+</html>

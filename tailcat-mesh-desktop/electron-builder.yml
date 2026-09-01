@@ -7,11 +7,14 @@ directories:
 files:
   - dist/**/*
 extraResources:
-  - from: resources/agent
-    to: agent
+  - from: resources/agent/tailcat-mesh-agent.jar
+    to: agent/tailcat-mesh-agent.jar
   - from: resources/tray.svg
     to: tray.svg
+  - from: resources/tailcat-mesh-logo.png
+    to: tailcat-mesh-logo.png
 win:
+  icon: resources/tailcat-mesh-logo.png
   # Java owns Wintun installation and route changes. Elevate the packaged
   # desktop once so Electron's native Java child inherits the same token.
   requestedExecutionLevel: requireAdministrator

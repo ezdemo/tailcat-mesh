@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -35,6 +37,7 @@ public final class AgentLocalStatusServer implements AutoCloseable {
 
     public static final String DESCRIPTOR_FILE_NAME = "local-status.json";
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentLocalStatusServer.class);
     private static final SecureRandom RANDOM = new SecureRandom();
     private final Path dataDir;
     private final Path descriptorPath;
@@ -155,12 +158,18 @@ public final class AgentLocalStatusServer implements AutoCloseable {
             return;
         }
         closeRequestBody(exchange);
-        try {
-            reconnectAction.run();
-            sendJson(exchange, 200, objectMapper.createObjectNode().put("accepted", true));
-        } catch (RuntimeException exception) {
-            sendError(exchange, 500, "reconnect failed");
-        }
+        // Reconnect can reconcile several long-lived Peer SOCKS processes and
+        // may legitimately take longer than a desktop IPC request timeout.
+        // A local control request should acknowledge intent immediately while
+        // the Agent continues the refresh in the background.
+        sendJson(exchange, 202, objectMapper.createObjectNode().put("accepted", true));
+        Thread.startVirtualThread(() -> {
+            try {
+                reconnectAction.run();
+            } catch (RuntimeException exception) {
+                LOGGER.warn("local reconnect failed; the next heartbeat will retry", exception);
+            }
+        });
     }
 
     private void handleShutdown(HttpExchange exchange) throws IOException {

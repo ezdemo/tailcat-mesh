@@ -1,5 +1,9 @@
 # Tailcat Mesh
 
+<p align="center">
+  <img src="tailcat-mesh-desktop/resources/tailcat-mesh-logo.png" alt="Tailcat Mesh logo" width="160" />
+</p>
+
 [English](#english) | [中文](#中文)
 
 ## English
@@ -63,6 +67,10 @@ The same settings can be placed in `agent.yml`:
 ```yaml
 server:
   url: https://mesh.example.com
+proxy:
+  type: http        # http or socks5
+  host: 127.0.0.1
+  port: 7890
 tailcat:
   version: 0.3.0
   autoDownload: true
@@ -75,6 +83,10 @@ agent:
   heartbeatSeconds: 15
   peerPingSeconds: 30
 ```
+
+The optional `proxy` section routes Agent control-plane HTTP/WebSocket traffic,
+official Tailcat downloads, and the Tailcat child process through a local HTTP or
+SOCKS5 proxy. Proxy credentials are not supported yet.
 
 Use `--once` only for diagnostics:
 
@@ -160,19 +172,25 @@ java -jar tailcat-mesh-server/target/tailcat-mesh-server-0.1.0-SNAPSHOT.jar
 
 The Server uses an H2 file database by default. Configure production administrator and database credentials through `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`. The development fallback is `admin` / `change-me`; change it before any non-local deployment.
 
+Build the Windows Desktop installer; this also builds and stages the current
+Java Agent JAR into the installer:
+
+```powershell
+cd tailcat-mesh-desktop
+npm install
+npm run dist
+```
+
 For PostgreSQL, `deploy/docker-compose.yml` requires `DB_PASSWORD` to be supplied through the environment.
 
 ### Administrator Web control plane
 
-The frontend in `tailcat-mesh-web/` supports login, device approval and disabling, enrollment token management, Virtual Network membership, TCP service management, Local Forward management, and Direct/DERP connection status.
-
-```powershell
-cd .\tailcat-mesh-web
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`. Leave the API base URL blank to use the Vite proxy to `http://localhost:8080`. For local HTTP testing, start the Server with `--tailcat-mesh.security.require-https=false`.
+The administrator UI is served by `tailcat-mesh-server` itself with Thymeleaf and
+jQuery; no separate Node/Vite process is required. After starting the Server,
+open `http://localhost:8080/login` and sign in with the configured administrator
+account. The UI covers login, device approval and disabling, enrollment token
+management, Virtual Network membership, TCP service management, Local Forward
+management, and Direct/DERP connection status.
 
 ### Official Tailcat binary
 
@@ -218,7 +236,6 @@ tailcat-mesh/
 ├─ tailcat-mesh-protocol/
 ├─ tailcat-mesh-server/
 ├─ tailcat-mesh-agent/
-├─ tailcat-mesh-web/
 ├─ deploy/
 └─ docs/
 ```
@@ -244,6 +261,8 @@ Tailcat Mesh 是一个基于官方 Tailcat 数据面的开源、自托管 TCP �
 - M7.6–M7.9 已把 Virtual Network 成员/设备投影、TCP-only 边界、Agent supervisor/reconnect、显式 allowlist、`--allow=none`、Network/Device 专属 server key 和撤销路径接入运行时；不使用 `--serve=exit-node`，不添加默认路由。M7.10 提供 Windows/Linux 特权 E2E 验收：虚拟 IP 稳定性、跨 Network 隔离、TCP 访问、Direct/DERP 路径、Agent 重启和成员移除撤销。
 - Agent 可打包为可执行 fat JAR，首次注册后把 Agent credential 保存到本地，重启时复用。
 - M8 已加入 `tailcat-mesh-desktop/` Windows Electron 薄壳：首次注册向导、托盘、登录自启动、Electron 原生 Java Agent 进程监督、loopback 状态接口和 NSIS 安装包；Java Agent 仍是 Mesh、Tailcat、Virtual LAN 运行时的唯一真相源。
+
+构建 Windows Desktop 安装包时，在 `tailcat-mesh-desktop` 执行 `npm run dist`；该命令会先构建当前版本的 Java Agent，并将其复制为 `resources/agent/tailcat-mesh-agent.jar` 后一并放入安装包。
 
 M8 Desktop 已提供 Windows Electron 薄壳、托盘、登录自启动、一次性注册向导、Electron 原生 Java Agent 监督、状态接口和 NSIS 安装包；Mesh Identity、Agent 运行时和 Native dependency lifecycle 仍由 Java 负责。
 
@@ -278,6 +297,10 @@ java -jar "C:\TailcatMesh\tailcat-mesh-agent-0.1.0-SNAPSHOT.jar" run --server ht
 ```yaml
 server:
   url: https://mesh.example.com
+proxy:
+  type: http        # http 或 socks5
+  host: 127.0.0.1
+  port: 7890
 tailcat:
   binary: C:/TailcatMesh/bin/tailcat.exe
   supportedVersion: 0.3.x
@@ -289,6 +312,9 @@ agent:
   heartbeatSeconds: 15
   peerPingSeconds: 30
 ```
+
+可选的 `proxy` 配置会让 Agent 的控制面 HTTP/WebSocket 请求、官方 Tailcat
+下载以及 Tailcat 子进程统一经过本地 HTTP 或 SOCKS5 代理；暂不支持代理账号密码。
 
 `--once` 仅用于诊断，会启动、上报并立即停止：
 
@@ -339,7 +365,7 @@ curl.exe http://127.0.0.1:18080
 
 ## 管理员最小操作
 
-管理员可以使用 `tailcat-mesh-web`，也可以使用 REST API。先登录并创建一次性 token：
+管理员可以直接打开 Server 内置的 Thymeleaf 管理界面，也可以使用 REST API。先启动 Server，访问 `http://localhost:8080/login` 登录；随后可以在“加入凭证”页面创建一次性 token。若使用 API，先登录并创建 token：
 
 ```powershell
 $login = Invoke-RestMethod -Method Post -Uri https://mesh.example.com/api/v1/auth/login -ContentType 'application/json' -Body '{"username":"admin","password":"<ADMIN_PASSWORD>"}'
@@ -420,21 +446,13 @@ java -jar tailcat-mesh-server/target/tailcat-mesh-server-0.1.0-SNAPSHOT.jar
 
 ## 管理员 Web 控制面
 
-前端代码位于 `tailcat-mesh-web/`，当前已经对接 Server 的管理员功能：登录、
-设备列表/详情、设备审批与禁用、Enrollment Token 创建/列表/禁用、Virtual Network 创建及成员/Virtual IPv4 管理、TCP 服务创建/修改/删除及运行态查看、Local Forward 创建/修改/删除及运行态查看、Peer Direct/DERP 连接状态查看。
-
-先启动 Server，再在另一个终端运行：
-
-```powershell
-cd .\tailcat-mesh-web
-npm install
-npm run dev
-```
-
-打开 `http://localhost:5173`。本地开发服务器会把 `/api` 请求代理到
-`http://localhost:8080`；本地 HTTP 测试时，Server 需要带上
-`--tailcat-mesh.security.require-https=false`。完整说明见
-`tailcat-mesh-web/README.md`。
+管理界面已经直接合并到 `tailcat-mesh-server`，使用 Thymeleaf 服务端渲染，
+并通过本地 WebJar 提供 jQuery 的菜单、弹窗、复制、确认和自动刷新增强。
+不再需要单独启动 Node/Vite。启动 Server 后打开 `http://localhost:8080/login`，
+使用 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 登录即可。页面覆盖登录、设备列表/详情、
+设备审批与禁用、Enrollment Token 创建/列表/禁用、Virtual Network 创建及成员/Virtual IPv4
+管理、TCP 服务创建/修改/删除及运行态查看、Local Forward 创建/修改/删除及运行态查看、
+Peer Direct/DERP 连接状态查看。
 
 ## 官方 Tailcat 二进制
 

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{fragments/layout :: shell('加入凭证', 'tokens', ~{::content})}">
+<section th:fragment="content">
+    <div class="page-head">
+        <div><p class="eyebrow">Enrollment</p><h1>加入凭证</h1><p class="page-description">创建一次性凭证，让新的 Java Agent 注册到这个控制面。原始凭证只会在创建后显示一次。</p></div>
+        <div class="inline-actions"><a class="button button-secondary" th:href="@{/admin/tokens}"><span aria-hidden="true">↻</span>刷新</a><a class="button button-primary" th:href="@{/admin/tokens(create=true)}">＋ 创建凭证</a></div>
+    </div>
+
+    <div class="notice notice-indigo"><span class="notice-icon">⚿</span><p><b th:text="${activeTokenCount}">0</b> 个有效凭证。凭证只用于首次注册，Agent 注册后会保存自己的控制面 credential。</p></div>
+
+    <section class="card form-panel" id="token-form" th:if="${tokenFormOpen}">
+        <div class="card-head"><div><p class="eyebrow">One-time enrollment</p><h2>创建加入凭证</h2><p>创建成功后完整凭证只在下一页显示一次，请立即复制。</p></div><a class="icon-link" th:href="@{/admin/tokens}" aria-label="关闭表单">×</a></div>
+        <form class="stack-form" method="post" th:action="@{/admin/tokens/create}">
+            <input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}">
+            <div class="form-grid three-columns"><label><span>目标 Network</span><select name="networkId"><option value="">默认 Network</option><option th:each="network : ${networks}" th:value="${network.id}" th:text="${network.name + ' · ' + network.cidr}">Default Mesh · 10.77.0.0/24</option></select></label><label><span>最大使用次数</span><input name="maxUses" required min="1" max="100000" type="number" th:value="${tokenMaxUses}"><small>单台设备通常保持为 1。</small></label><label><span>有效期（小时）</span><input name="expiresInHours" required min="1" max="8760" type="number" th:value="${tokenExpiresInHours}"></label></div>
+            <div class="form-actions"><a class="button button-secondary" th:href="@{/admin/tokens}">取消</a><button class="button button-primary" type="submit">创建凭证</button></div>
+        </form>
+    </section>
+
+    <section class="card token-created" th:if="${createdToken != null}">
+        <div class="created-heading"><span class="stat-icon tone-amber">!</span><div><p class="eyebrow">显示一次</p><h2>加入凭证已创建</h2><p>请立即复制并交给设备管理员；离开页面后将无法再次查看原始凭证。</p></div></div>
+        <div class="secret-value" id="created-token" th:text="${createdToken.token}">tm_enroll_xxx</div>
+        <div class="created-meta"><span>有效期至 <b th:text="${@adminWeb.date(createdToken.expiresAt)}">—</b></span><span>最大使用次数 <b th:text="${createdToken.maxUses}">1</b></span><button class="button button-primary copy-button" type="button" data-copy-target="#created-token">复制凭证</button></div>
+    </section>
+
+    <section class="card table-card">
+        <div class="table-scroll" th:if="${!#lists.isEmpty(tokens)}">
+            <table>
+                <thead><tr><th>凭证</th><th>Network</th><th>状态</th><th>使用次数</th><th>过期时间</th><th><span class="sr-only">操作</span></th></tr></thead>
+                <tbody>
+                <tr th:each="token : ${tokens}">
+                    <td><span class="table-primary"><span class="avatar-icon token-icon">⚿</span><span><b class="mono" th:text="${token.id}">uuid</b><small th:text="${'创建于 ' + @adminWeb.date(token.createdAt)}">创建于 —</small></span></span></td>
+                    <td class="muted-cell" th:text="${networkNames[token.networkId] ?: '未知 Network'}">Default Mesh</td>
+                    <td><span class="badge" th:classappend="${@adminWeb.tokenActive(token.expiresAt, token.enabled)} ? ' badge-success' : ' badge-muted'" th:text="${@adminWeb.tokenActive(token.expiresAt, token.enabled) ? '有效' : (token.enabled ? '已过期' : '已禁用')}">有效</span></td>
+                    <td><b class="small-strong" th:text="${token.usedCount + ' / ' + token.maxUses}">0 / 1</b><span class="progress"><i th:style="${'width:' + @adminWeb.usagePercent(token.usedCount, token.maxUses) + '%'}"></i></span></td>
+                    <td class="muted-cell" th:text="${@adminWeb.date(token.expiresAt)}">—</td>
+                    <td class="action-cell"><form method="post" th:action="@{/admin/tokens/{id}/disable(id=${token.id})}" th:if="${token.enabled}" data-confirm="之后不能再用它注册新设备，确定禁用这个凭证吗？"><input type="hidden" th:if="${_csrf != null}" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"><button class="text-button danger-text" type="submit">禁用</button></form></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="empty-state" th:if="${#lists.isEmpty(tokens)}"><span class="empty-icon">⚿</span><h3>还没有加入凭证</h3><p>创建一个凭证，然后把它交给需要加入 Mesh 的设备管理员。</p><a class="button button-primary" th:href="@{/admin/tokens(create=true)}">创建第一个凭证</a></div>
+    </section>
+</section>
+</html>

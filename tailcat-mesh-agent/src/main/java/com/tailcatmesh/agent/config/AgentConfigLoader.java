@@ -54,6 +54,7 @@ public final class AgentConfigLoader {
         int peerPingSeconds = boundedSeconds(root, "agent.peerPingSeconds", DEFAULT_PEER_PING_SECONDS);
         VirtualLanAgentConfig virtualLan = virtualLan(root, baseDir);
         String deviceName = text(root, "device.name", "");
+        NetworkProxyConfig proxy = proxy(root);
 
         return new AgentConfig(
                 serverUrl,
@@ -68,8 +69,27 @@ public final class AgentConfigLoader {
                 virtualLan,
                 tailcatAutoDownload,
                 tailcatVersion,
-                deviceName
+                deviceName,
+                proxy
         );
+    }
+
+    private NetworkProxyConfig proxy(JsonNode root) {
+        JsonNode proxy = root == null ? null : root.path("proxy");
+        if (proxy == null || proxy.isMissingNode() || proxy.isNull()) {
+            return null;
+        }
+        if (!proxy.isObject()) {
+            throw new AgentConfigException("TM-AGENT-010", "proxy configuration must be a YAML object");
+        }
+        try {
+            String type = text(proxy, "type", "");
+            String host = text(proxy, "host", "");
+            int port = proxyPort(proxy);
+            return NetworkProxyConfig.of(type, host, port);
+        } catch (IllegalArgumentException exception) {
+            throw new AgentConfigException("TM-AGENT-010", "proxy configuration is invalid", exception);
+        }
     }
 
     private VirtualLanAgentConfig virtualLan(JsonNode root, Path baseDir) {
@@ -183,6 +203,19 @@ public final class AgentConfigLoader {
             throw new AgentConfigException("TM-AGENT-010", path + " must be between 1 and 86400");
         }
         return value;
+    }
+
+    private static int proxyPort(JsonNode proxy) {
+        JsonNode current = proxy.path("port");
+        if (current == null || current.isMissingNode() || current.isNull()) {
+            throw new IllegalArgumentException("proxy.port is required");
+        }
+        String value = current.asText("").trim();
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("proxy.port must be an integer", exception);
+        }
     }
 
     private static List<String> listText(JsonNode root, String path) {

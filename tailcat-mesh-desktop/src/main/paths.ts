@@ -1,7 +1,7 @@
 import { homedir, hostname } from "node:os";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { DesktopSettings } from "../shared/types.js";
+import type { DesktopSettings, LanguagePreference, LocalProxySettings, LocalProxyType, ThemePreference } from "../shared/types.js";
 
 export interface DesktopPaths {
   meshHome: string;
@@ -31,7 +31,7 @@ export function createDesktopPaths(resourceRoot: string, agentJarPath?: string):
     localStatusPath: path.join(dataDirectory, "local-status.json"),
     resourceRoot,
     agentJarPath: agentJarPath ?? path.join(resourceRoot, "agent", "tailcat-mesh-agent.jar"),
-    trayIconPath: path.join(resourceRoot, "tray.svg")
+    trayIconPath: path.join(resourceRoot, "tailcat-mesh-logo.png")
   };
 }
 
@@ -73,6 +73,40 @@ export function normalizedSettings(settings: Partial<DesktopSettings>): DesktopS
   return {
     serverUrl,
     deviceName: deviceName.slice(0, 255),
-    launchAtStartup: settings.launchAtStartup !== false
+    launchAtStartup: settings.launchAtStartup !== false,
+    startMinimized: settings.startMinimized !== false,
+    theme: normalizedTheme(settings.theme),
+    language: normalizedLanguage(settings.language),
+    proxy: normalizedProxy(settings.proxy)
   };
+}
+
+function normalizedTheme(value: unknown): ThemePreference {
+  return value === "light" || value === "dark" ? value : "system";
+}
+
+function normalizedLanguage(value: unknown): LanguagePreference {
+  return value === "en-US" ? "en-US" : "zh-CN";
+}
+
+function normalizedProxy(value: unknown): LocalProxySettings {
+  if (typeof value !== "object" || value === null) {
+    return { type: "none", host: "", port: null };
+  }
+  const raw = value as Record<string, unknown>;
+  const rawType = typeof raw.type === "string" ? raw.type.trim().toLowerCase() : "none";
+  const type: LocalProxyType = rawType === "http" || rawType === "socks5" ? rawType : "none";
+  if (type === "none") {
+    return { type, host: "", port: null };
+  }
+  const host = typeof raw.host === "string" ? raw.host.trim() : "";
+  const port = normalizeProxyPort(raw.port);
+  return { type, host, port };
+}
+
+function normalizeProxyPort(value: unknown): number | null {
+  const port = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim() ? Number(value.trim()) : NaN;
+  return Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : null;
 }
